@@ -1,0 +1,9 @@
+{"timestamp":"2026-04-19T00:14:59.219Z","eventType":"auth_login_error"}
+{"timestamp":"2026-04-19T00:15:36.620Z","eventType":"auth_login_error"}
+{"timestamp":"2026-04-19T00:22:26.304Z","eventType":"role_switch_error"}
+{"timestamp":"2026-04-19T00:23:18.477Z","eventType":"role_switch_error"}
+{"timestamp":"2026-04-19T00:58:25.317Z","eventType":"role_delegation_create_error","message":"Cannot read properties of undefined (reading 'create')"}
+{"timestamp":"2026-04-19T00:59:57.994Z","eventType":"role_delegation_created","grantorUserId":"cmo50s8iw000074uj5e4wbvhz","granteeUserId":"cmo50s8j5000174ujk6sw936p","targetRole":"tech_admin","endsAt":"2026-04-20T00:59:57.917Z"}
+{"timestamp":"2026-04-19T01:17:03.261Z","eventType":"auth_login_error"}
+{"timestamp":"2026-04-19T01:17:05.633Z","eventType":"auth_login_error"}
+{"timestamp":"2026-04-19T01:18:58.692Z","eventType":"auth_login_error"}

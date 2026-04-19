@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  district_admin
+  school_admin
+  tech_admin
+  interventionist
+  instructional_coach
+  data_analyst
+  support_admin
+  teacher
+  student
+  parent
+}
+
+model User {
+  id           String               @id @default(cuid())
+  fullName     String
+  email        String               @unique
+  passwordHash String
+  role         UserRole             @default(student)
+  districtId   String               @default("default-district")
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  resetTokens  PasswordResetToken[]
+  grantedDelegations DelegationGrant[] @relation("DelegationGrantor")
+  receivedDelegations DelegationGrant[] @relation("DelegationGrantee")
+  policyUpdates DistrictRolePermissionOverride[] @relation("PolicyUpdatedBy")
+  policySnapshots DistrictPolicySnapshot[] @relation("PolicySnapshotCreatedBy")
+  trialRunSnapshots TrialRunSnapshot[]
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model DelegationGrant {
+  id            String    @id @default(cuid())
+  grantorUserId String
+  granteeUserId String
+  targetRole    UserRole
+  reason        String?
+  startsAt      DateTime
+  endsAt        DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  grantor       User      @relation("DelegationGrantor", fields: [grantorUserId], references: [id], onDelete: Cascade)
+  grantee       User      @relation("DelegationGrantee", fields: [granteeUserId], references: [id], onDelete: Cascade)
+
+  @@index([grantorUserId])
+  @@index([granteeUserId])
+  @@index([targetRole])
+  @@index([startsAt, endsAt])
+}
+
+model DistrictRolePermissionOverride {
+  id              String   @id @default(cuid())
+  districtId      String
+  role            UserRole
+  permission      String
+  enabled         Boolean
+  updatedByUserId String?
+  updatedAt       DateTime @updatedAt
+  updatedBy       User?    @relation("PolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([districtId, role, permission])
+  @@index([districtId, role])
+}
+
+model DistrictPolicySnapshot {
+  id              String   @id @default(cuid())
+  districtId      String
+  label           String
+  preset          String?
+  reason          String?
+  entries         Json
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  createdBy       User?    @relation("PolicySnapshotCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([districtId, createdAt])
+}
+
+model TrialRunSnapshot {
+  id          String   @id @default(cuid())
+  districtId  String
+  userId      String
+  name        String
+  fileName    String?
+  rowCount    Int
+  invalidRows Int      @default(0)
+  avgPre      Float
+  avgPost     Float
+  avgGain     Float
+  improvedCount Int
+  rows        Json
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([districtId, createdAt])
+  @@index([userId, createdAt])
+  @@index([districtId, deletedAt, createdAt])
+}
