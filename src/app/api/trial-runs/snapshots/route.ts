@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import type { Prisma } from "@prisma/client"
 import { z } from "zod"
 
 import { canAccessPath } from "@/lib/rbac"
@@ -85,7 +84,15 @@ export async function GET(request: Request) {
       ? new Date(Date.now() - sinceHours * 60 * 60 * 1000)
       : null
 
-  const where: Prisma.TrialRunSnapshotWhereInput =
+  const where: {
+    districtId: string
+    deletedAt: null | { not: null; gte?: Date }
+    OR?: Array<{
+      name?: { contains: string; mode: "insensitive" }
+      fileName?: { contains: string; mode: "insensitive" }
+    }>
+    avgGain?: { gte: number }
+  } =
     state === "deleted"
       ? {
           districtId: session.districtId,
