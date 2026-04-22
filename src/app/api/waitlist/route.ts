@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
+import { deliverWaitlistSubmission } from "@/lib/server/waitlist"
+
 type WaitlistPayload = {
   fullName?: string
   email?: string
@@ -11,19 +13,25 @@ const WaitlistSchema = z.object({
   email: z.string().email(),
 })
 
+export const runtime = "nodejs"
+
 export async function POST(request: Request) {
   try {
     const body = WaitlistSchema.parse((await request.json()) as WaitlistPayload)
     const fullName = body.fullName?.trim() ?? ""
     const email = body.email.trim().toLowerCase()
-
-    // Temporary endpoint: currently logs submissions to the server console.
-    // TODO: Replace with workspace email or CRM integration when available.
-    console.log("[waitlist] new submission", {
+    const submission = {
       fullName: fullName || undefined,
       email,
       submittedAt: new Date().toISOString(),
-    })
+    }
+    const result = await deliverWaitlistSubmission(submission)
+
+    if (result.destination === "local_queue") {
+      console.info("[waitlist] queued submission locally (CRM webhook not configured)", {
+        email,
+      })
+    }
 
     return NextResponse.json({
       message:
