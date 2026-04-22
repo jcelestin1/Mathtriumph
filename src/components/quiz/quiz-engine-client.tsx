@@ -22,7 +22,6 @@ import {
   getCoachModelLabel,
   type AiCoachModel,
 } from "@/lib/ai-coach"
-import { logErrorPatterns } from "@/lib/error-pattern-logging"
 import {
   createSessionQuiz,
   evaluateQuestion,
@@ -396,7 +395,6 @@ export function QuizEngineClient({ quiz }: Props) {
     await saveQuizAttempt(attempt)
     const latestAttempts = await syncQuizAttempts()
     setRecentAttempts(latestAttempts)
-    logErrorPatterns(errorAnalyses)
     setSubmittedAttempt(attempt)
     setAnalysisTeacherAction(inferredTeacherAction)
   }
@@ -461,6 +459,8 @@ export function QuizEngineClient({ quiz }: Props) {
           "content-type": "application/json",
         },
         body: JSON.stringify({
+          purpose: "eoc_preparation",
+          districtId,
           model: coachModel,
           scorePercent: submittedAttempt.scorePercent,
           elapsedSeconds: submittedAttempt.elapsedSeconds,

@@ -21,6 +21,15 @@ type FerpaStatusResponse = {
     trainingPolicy: string
     inferenceRetention: string
     highImpactDecisionPolicy: string
+    purposeLimitation: string
+    dataSegregation: string
+    processingBoundary: string
+  }
+  auditSummary: {
+    inferenceEventsLast24h: number
+    requiresHumanReviewLast24h: number
+    blockedIsolationAttemptsLast24h: number
+    failedInferenceEventsLast24h: number
   }
   modelCardPath: string
 }
@@ -105,6 +114,36 @@ export function ManagerPrivacyFerpaStatus() {
                   Model card
                 </p>
                 <p className="text-muted-foreground">{status.modelCardPath}</p>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-md border border-border/70 p-2 text-xs">
+                <p className="font-medium">Last 24h AI Inference Events</p>
+                <p className="text-muted-foreground">
+                  {status.auditSummary.inferenceEventsLast24h} total,{" "}
+                  {status.auditSummary.requiresHumanReviewLast24h} flagged for human review
+                </p>
+              </div>
+              <div className="rounded-md border border-border/70 p-2 text-xs">
+                <p className="font-medium">Isolation & Reliability Signals</p>
+                <p className="text-muted-foreground">
+                  {status.auditSummary.blockedIsolationAttemptsLast24h} blocked district-isolation
+                  attempts, {status.auditSummary.failedInferenceEventsLast24h} failed inference events
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="rounded-md border border-border/70 p-2 text-xs">
+                <p className="font-medium">Purpose limitation</p>
+                <p className="text-muted-foreground">{status.aiPolicy.purposeLimitation}</p>
+              </div>
+              <div className="rounded-md border border-border/70 p-2 text-xs">
+                <p className="font-medium">Data segregation</p>
+                <p className="text-muted-foreground">{status.aiPolicy.dataSegregation}</p>
+              </div>
+              <div className="rounded-md border border-border/70 p-2 text-xs">
+                <p className="font-medium">Processing boundary</p>
+                <p className="text-muted-foreground">{status.aiPolicy.processingBoundary}</p>
               </div>
             </div>
           </>

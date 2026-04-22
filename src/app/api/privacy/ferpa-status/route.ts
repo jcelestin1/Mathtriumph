@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
 
 import { getServerSession } from "@/lib/security/auth-server"
+import { getAiAuditSummaryForDistrict } from "@/lib/security/audit-log"
 import { AI_GOVERNANCE_POLICY } from "@/lib/security/ai-governance"
+
+export const runtime = "nodejs"
 
 export async function GET() {
   const session = await getServerSession()
@@ -9,23 +12,25 @@ export async function GET() {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
   }
 
+  const auditSummary = await getAiAuditSummaryForDistrict(session.districtId)
+
   return NextResponse.json({
     generatedAt: new Date().toISOString(),
     districtId: session.districtId,
     checks: [
       {
         key: "purpose-limitation",
-        label: "Purpose limitation (EOC prep only)",
+        label: "Strict purpose limitation",
         status: "pass",
         detail:
-          "AI routes enforce approved educational purposes: eoc_preparation, progress_tracking, error_analysis.",
+          "AI routes enforce feature-level educational purposes (EOC preparation, error analysis, progress tracking) and reject out-of-scope requests.",
       },
       {
         key: "district-isolation",
-        label: "District-isolated processing",
+        label: "RAG-only district-isolated processing",
         status: "pass",
         detail:
-          "Session district and request district must match; cross-district inference is blocked.",
+          "Session district and request district must match; cross-district inference is blocked and logged.",
       },
       {
         key: "ephemeral-processing",
@@ -33,6 +38,13 @@ export async function GET() {
         status: "pass",
         detail:
           "Dual-stream and predictor processing occur in-memory with de-identified audit artifacts only.",
+      },
+      {
+        key: "server-only-processing",
+        label: "Server-side processing boundary",
+        status: "pass",
+        detail:
+          "Sensitive student education records are handled in authenticated server routes only.",
       },
       {
         key: "no-training-on-pii",
@@ -49,6 +61,7 @@ export async function GET() {
           "AI outputs for interventions and low-confidence predictions are flagged for teacher review.",
       },
     ],
+    auditSummary,
     aiPolicy: AI_GOVERNANCE_POLICY,
     modelCardPath: "/docs/model-cards/dual-stream-eoc-predictor.md",
   })

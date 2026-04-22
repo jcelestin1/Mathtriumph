@@ -6,8 +6,9 @@ import { getServerSession } from "@/lib/security/auth-server"
 import { logSecurityEvent } from "@/lib/security/audit-log"
 import {
   AI_GOVERNANCE_POLICY,
+  assertFeaturePurposeAllowed,
   assertDistrictIsolation,
-  assertPurposeAllowed,
+  buildInferenceId,
   sanitizeForAiPrompt,
 } from "@/lib/security/ai-governance"
 import { checkRateLimit } from "@/lib/security/rate-limit"
@@ -20,6 +21,8 @@ const ErrorAnalysisPayloadSchema = z.object({
 })
 
 type ErrorAnalysisPayload = z.infer<typeof ErrorAnalysisPayloadSchema>
+
+export const runtime = "nodejs"
 
 export async function POST(request: Request) {
   const session = await getServerSession()
@@ -41,13 +44,20 @@ export async function POST(request: Request) {
     }
 
     const body = ErrorAnalysisPayloadSchema.parse(await request.json()) as ErrorAnalysisPayload
-    const purpose = assertPurposeAllowed(body.purpose)
+    const purpose = assertFeaturePurposeAllowed("dual_stream_error_analysis", body.purpose)
+    const inferenceId = buildInferenceId("dual_stream_error_analysis")
     if (
       !assertDistrictIsolation({
         requestedDistrictId: body.districtId,
         sessionDistrictId: session.districtId,
       })
     ) {
+      await logSecurityEvent({
+        eventType: "district_isolation_blocked",
+        feature: "dual_stream_error_analysis",
+        requestedDistrictId: body.districtId,
+        sessionDistrictId: session.districtId,
+      })
       return NextResponse.json({ message: "District isolation validation failed." }, { status: 403 })
     }
     const analyses = Array.isArray(body.analyses) ? body.analyses.slice(0, 6) : []
@@ -60,7 +70,17 @@ export async function POST(request: Request) {
       )
     }
 
-    const dualStreamPrompts = analyses.map((item) => ({
+    await logSecurityEvent({
+      eventType: "ai_inference_started",
+      feature: "dual_stream_error_analysis",
+      inferenceId,
+      districtId: session.districtId,
+      purpose,
+      analysisCount: analyses.length,
+      policyVersion: AI_GOVERNANCE_POLICY.policyVersion,
+    })
+
+    let dualStreamPrompts = analyses.map((item) => ({
       questionId: item.questionId,
       stream1: item.stream1Draft,
       stream2: item.stream2Diagnostic,
@@ -77,7 +97,9 @@ export async function POST(request: Request) {
           : "low"
 
     await logSecurityEvent({
-      eventType: "ai_error_analysis_generated",
+      eventType: "ai_inference_completed",
+      feature: "dual_stream_error_analysis",
+      inferenceId,
       districtId: session.districtId,
       purpose,
       analysisCount: analyses.length,
@@ -86,9 +108,10 @@ export async function POST(request: Request) {
       requiresHumanReview: true,
       architecture: AI_GOVERNANCE_POLICY.architecture,
       trainingPolicy: AI_GOVERNANCE_POLICY.trainingPolicy,
+      processingBoundary: AI_GOVERNANCE_POLICY.processingBoundary,
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       dualStreamPrompts,
       architecture: "sequential-dual-stream",
       interventionPriority,
@@ -104,9 +127,22 @@ export async function POST(request: Request) {
         purpose,
         districtId: session.districtId,
         requiresHumanReview: true,
+        purposeLimitation: AI_GOVERNANCE_POLICY.purposeLimitation,
+        processingBoundary: AI_GOVERNANCE_POLICY.processingBoundary,
+      },
+      audit: {
+        inferenceId,
       },
     })
-  } catch {
+
+    dualStreamPrompts = []
+    return response
+  } catch (error) {
+    await logSecurityEvent({
+      eventType: "ai_inference_failed",
+      feature: "dual_stream_error_analysis",
+      errorMessage: error instanceof Error ? error.message : "unknown",
+    })
     return NextResponse.json(
       { message: "Invalid error analysis payload." },
       { status: 400 }

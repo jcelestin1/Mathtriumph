@@ -4,8 +4,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import {
   type DemoRole,
-  fetchDemoAuthSnapshot,
-  getDefaultAuthSnapshot,
 } from "@/lib/demo-auth"
 import { type AppPermission } from "@/lib/rbac"
 
@@ -36,6 +34,13 @@ type AuthState = {
   permissions: string[]
 }
 
+const FALLBACK_AUTH_STATE: AuthState = {
+  isAuthenticated: false,
+  role: "student",
+  districtId: "fl-demo-district",
+  permissions: [],
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [{ isAuthenticated, role, districtId, permissions }, setAuthState] = useState<AuthState>(() => ({
     isAuthenticated: false,
@@ -45,22 +50,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }))
   const [isHydrated, setIsHydrated] = useState(false)
 
+  const refreshSession = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/session", {
+        method: "GET",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+      })
+      if (!response.ok) {
+        setAuthState(FALLBACK_AUTH_STATE)
+        return
+      }
+      const json = (await response.json()) as Partial<AuthState>
+      setAuthState({
+        isAuthenticated: Boolean(json.isAuthenticated),
+        role: (json.role as DemoRole | undefined) ?? "student",
+        districtId: json.districtId ?? "fl-demo-district",
+        permissions: Array.isArray(json.permissions) ? json.permissions : [],
+      })
+    } catch {
+      setAuthState(FALLBACK_AUTH_STATE)
+    }
+  }, [])
+
   useEffect(() => {
     let active = true
-    void fetchDemoAuthSnapshot().then((snapshot) => {
-      if (!active) return
-      setAuthState({
-        isAuthenticated: snapshot.isAuthenticated,
-        role: snapshot.role,
-        districtId: snapshot.districtId,
-        permissions: snapshot.permissions,
-      })
-      setIsHydrated(true)
-    })
+    void (async () => {
+      await refreshSession()
+      if (active) setIsHydrated(true)
+    })()
     return () => {
       active = false
     }
-  }, [])
+  }, [refreshSession])
 
   const login = useCallback(async (email: string, password: string, rememberMe = true) => {
     const response = await fetch("/api/auth/login", {
@@ -75,18 +97,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!response.ok) {
       throw new Error("Login failed.")
     }
-    const json = (await response.json()) as {
-      role?: DemoRole
-      districtId?: string
-      permissions?: string[]
-    }
-    setAuthState((previous) => ({
-      isAuthenticated: true,
-      role: json.role ?? previous.role,
-      districtId: json.districtId ?? previous.districtId,
-      permissions: Array.isArray(json.permissions) ? json.permissions : previous.permissions,
-    }))
-  }, [])
+    await refreshSession()
+  }, [refreshSession])
 
   const loginAs = useCallback(async (
     nextRole: DemoRole,
@@ -110,26 +122,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!response.ok) {
       throw new Error("Role switch is not authorized for this account.")
     }
-    setAuthState((previous) => ({
-      isAuthenticated: true,
-      role: nextRole,
-      districtId: previous.districtId,
-      permissions: previous.permissions,
-    }))
-  }, [])
+    await refreshSession()
+  }, [refreshSession])
 
   const logout = useCallback(async () => {
     await fetch("/api/auth/logout", {
       method: "POST",
     })
-    const fallback = getDefaultAuthSnapshot()
-    setAuthState({
-      isAuthenticated: fallback.isAuthenticated,
-      role: fallback.role,
-      districtId: fallback.districtId,
-      permissions: fallback.permissions,
-    })
-  }, [])
+    await refreshSession()
+  }, [refreshSession])
 
   const value = useMemo(
     () => ({

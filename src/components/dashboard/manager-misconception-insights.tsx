@@ -1,17 +1,44 @@
 "use client"
 
 import { BookOpenCheck, Sparkles, Target } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 
-import { getErrorPatternSummary } from "@/lib/error-pattern-logging"
 import { addInterventionQueueItem } from "@/lib/intervention-queue"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
+type MisconceptionPattern = {
+  reportingCategory: string
+  misconceptionTag: string
+  errorType: string
+  count: number
+}
+
 export function ManagerMisconceptionInsights() {
   const [message, setMessage] = useState("")
-  const patterns = useMemo(() => getErrorPatternSummary(8), [])
+  const [patterns, setPatterns] = useState<MisconceptionPattern[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      try {
+        const response = await fetch("/api/student-records/misconceptions?limit=8", {
+          cache: "no-store",
+        })
+        if (!response.ok) return
+        const json = (await response.json()) as { patterns?: MisconceptionPattern[] }
+        if (!active) return
+        setPatterns(Array.isArray(json.patterns) ? json.patterns : [])
+      } finally {
+        if (active) setIsLoading(false)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
 
   return (
     <Card className="premium-surface">
@@ -61,6 +88,10 @@ export function ManagerMisconceptionInsights() {
               </div>
             </div>
           ))
+        ) : isLoading ? (
+          <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+            Loading misconception trends...
+          </p>
         ) : (
           <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
             No misconception logs yet. Ask students to complete practice for class-level trends.

@@ -301,8 +301,11 @@ export default function Home() {
             {new Date().getFullYear()} MathTriumph. All rights reserved.
           </p>
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            <Link href="#">Privacy</Link>
-            <Link href="#">Terms</Link>
+            <Link href="/privacy" className="hover:text-teal-600">
+              Privacy & FERPA
+            </Link>
+            <Link href="/dpa-ferpa">DPA (FERPA)</Link>
+            <Link href="/terms">Terms</Link>
             <Link href="#">Contact</Link>
             <Link href="/dashboard" className="inline-flex items-center gap-1">
               <Target className="size-3.5" />

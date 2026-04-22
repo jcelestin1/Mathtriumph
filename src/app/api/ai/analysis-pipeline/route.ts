@@ -9,8 +9,9 @@ import { getServerSession } from "@/lib/security/auth-server"
 import { logSecurityEvent } from "@/lib/security/audit-log"
 import {
   AI_GOVERNANCE_POLICY,
+  assertFeaturePurposeAllowed,
   assertDistrictIsolation,
-  assertPurposeAllowed,
+  buildInferenceId,
   sanitizeForAiPrompt,
 } from "@/lib/security/ai-governance"
 import { checkRateLimit } from "@/lib/security/rate-limit"
@@ -41,6 +42,8 @@ function summarizeInterventionPriority(
   return "low"
 }
 
+export const runtime = "nodejs"
+
 export async function POST(request: Request) {
   const session = await getServerSession()
   if (!session) {
@@ -65,7 +68,8 @@ export async function POST(request: Request) {
 
   try {
     const parsed = AnalysisPipelineSchema.parse(await request.json())
-    const purpose = assertPurposeAllowed(parsed.purpose)
+    const purpose = assertFeaturePurposeAllowed("analysis_pipeline", parsed.purpose)
+    const inferenceId = buildInferenceId("analysis_pipeline")
     const districtAllowed = assertDistrictIsolation({
       requestedDistrictId: parsed.districtId,
       sessionDistrictId: session.districtId,
@@ -73,14 +77,25 @@ export async function POST(request: Request) {
     if (!districtAllowed) {
       await logSecurityEvent({
         eventType: "district_isolation_blocked",
+        feature: "analysis_pipeline",
         requestedDistrictId: parsed.districtId,
         sessionDistrictId: session.districtId,
       })
       return NextResponse.json({ message: "District isolation validation failed." }, { status: 403 })
     }
 
+    await logSecurityEvent({
+      eventType: "ai_inference_started",
+      feature: "analysis_pipeline",
+      inferenceId,
+      districtId: session.districtId,
+      purpose,
+      questionCount: parsed.results.length,
+      policyVersion: AI_GOVERNANCE_POLICY.policyVersion,
+    })
+
     // Purpose-limited in-memory pipeline: no raw payload persistence.
-    const analyses = buildErrorAnalyses({
+    let analyses = buildErrorAnalyses({
       quiz: parsed.quiz,
       results: parsed.results,
       questionWork: parsed.questionWork,
@@ -99,7 +114,9 @@ export async function POST(request: Request) {
           : "Teacher confirmation recommended: continue with reinforcement warm-ups."
 
     await logSecurityEvent({
-      eventType: "ai_dual_stream_predictor_inference",
+      eventType: "ai_inference_completed",
+      feature: "analysis_pipeline",
+      inferenceId,
       districtId: session.districtId,
       purpose,
       analysisCount: analyses.length,
@@ -108,9 +125,11 @@ export async function POST(request: Request) {
       requiresHumanReview: prediction.requiresHumanReview ?? true,
       policyVersion: AI_GOVERNANCE_POLICY.policyVersion,
       architecture: AI_GOVERNANCE_POLICY.architecture,
+      processingBoundary: AI_GOVERNANCE_POLICY.processingBoundary,
+      dataSegregation: AI_GOVERNANCE_POLICY.dataSegregation,
     })
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       analyses,
       prediction: {
         ...prediction,
@@ -124,9 +143,26 @@ export async function POST(request: Request) {
         ragIsolation: AI_GOVERNANCE_POLICY.architecture,
         ephemeralProcessing: AI_GOVERNANCE_POLICY.inferenceRetention,
         noTrainingOnPii: AI_GOVERNANCE_POLICY.trainingPolicy,
+        purposeLimitation: AI_GOVERNANCE_POLICY.purposeLimitation,
+        processingBoundary: AI_GOVERNANCE_POLICY.processingBoundary,
+        requiresHumanReview: true,
+      },
+      audit: {
+        inferenceId,
       },
     })
-  } catch {
+
+    // Clear in-memory references after response construction.
+    analyses = []
+
+    return response
+  } catch (error) {
+    await logSecurityEvent({
+      eventType: "ai_inference_failed",
+      feature: "analysis_pipeline",
+      districtId: session.districtId,
+      errorMessage: error instanceof Error ? error.message : "unknown",
+    })
     return NextResponse.json(
       { message: "Invalid secure analysis pipeline payload." },
       { status: 400 }

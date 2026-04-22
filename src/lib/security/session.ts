@@ -3,10 +3,10 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { z } from "zod"
 
 import type { DemoRole } from "@/lib/demo-auth"
+export { SESSION_COOKIE_NAME } from "@/lib/security/session-constants"
 
 const SESSION_SECRET =
   process.env.SESSION_SECRET ?? "dev-only-insecure-session-secret-change-me"
-export const SESSION_COOKIE_NAME = "mt_session_v2"
 const SESSION_TTL_SHORT_SECONDS = 60 * 60 * 8
 const SESSION_TTL_LONG_SECONDS = 60 * 60 * 24 * 7
 

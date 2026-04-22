@@ -6,20 +6,23 @@ import {
   type AiCoachModel,
   getCoachModelLabel,
 } from "@/lib/ai-coach"
+import { getServerSession } from "@/lib/security/auth-server"
 import { logSecurityEvent } from "@/lib/security/audit-log"
+import {
+  AI_GOVERNANCE_POLICY,
+  assertDistrictIsolation,
+  assertFeaturePurposeAllowed,
+  buildInferenceId,
+  sanitizeTopicList,
+} from "@/lib/security/ai-governance"
 import { checkRateLimit } from "@/lib/security/rate-limit"
 import { redactPotentialPii } from "@/lib/security/pii"
-
-type CoachResult = {
-  topic: string
-  isCorrect: boolean
-  userAnswer: string
-  expectedAnswer: string
-}
 
 const MAX_RESULTS = 10
 
 const CoachPayloadSchema = z.object({
+  purpose: z.enum(["eoc_preparation", "progress_tracking", "error_analysis"]),
+  districtId: z.string().min(2).max(80),
   model: z.enum(["claude-4", "gpt-5.1"]).optional(),
   scorePercent: z.number().min(0).max(100).optional(),
   elapsedSeconds: z.number().min(0).optional(),
@@ -62,6 +65,12 @@ function buildCoachPrompt(payload: Required<CoachPayload>) {
 
   return [
     "You are MathTriumph AI Coach.",
+    "FERPA safeguards:",
+    "- Purpose limitation: eoc preparation and educational progress support only.",
+    "- Never infer or output personal identifiers.",
+    "- Keep recommendations advisory and require teacher confirmation.",
+    "- Do not recommend disciplinary, legal, or placement decisions.",
+    "",
     "Give practical K-12 friendly feedback with a confident, encouraging tone.",
     "Output in markdown with these exact sections:",
     "## Strength Snapshot",
@@ -140,6 +149,7 @@ async function callOpenAi(prompt: string) {
     },
     body: JSON.stringify({
       model,
+      store: false,
       temperature: 0.3,
       messages: [
         {
@@ -170,7 +180,13 @@ async function callOpenAi(prompt: string) {
   return text
 }
 
+export const runtime = "nodejs"
+
 export async function POST(request: Request) {
+  const session = await getServerSession()
+  if (!session) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+  }
   try {
     const ip =
       request.headers.get("x-forwarded-for") ??
@@ -189,12 +205,30 @@ export async function POST(request: Request) {
     }
 
     const body = CoachPayloadSchema.parse(await request.json()) as CoachPayload
+    const purpose = assertFeaturePurposeAllowed("ai_coach", body.purpose)
+    const inferenceId = buildInferenceId("ai_coach")
+    const districtAllowed = assertDistrictIsolation({
+      requestedDistrictId: body.districtId,
+      sessionDistrictId: session.districtId,
+    })
+    if (!districtAllowed) {
+      await logSecurityEvent({
+        eventType: "district_isolation_blocked",
+        feature: "ai_coach",
+        requestedDistrictId: body.districtId,
+        sessionDistrictId: session.districtId,
+      })
+      return NextResponse.json({ message: "District isolation validation failed." }, { status: 403 })
+    }
+
     const model: AiCoachModel = isAiCoachModel(body.model) ? body.model : "gpt-5.1"
     const payload: Required<CoachPayload> = {
+      purpose,
+      districtId: session.districtId,
       model,
       scorePercent: Math.max(0, Math.min(100, body.scorePercent ?? 0)),
       elapsedSeconds: Math.max(0, body.elapsedSeconds ?? 0),
-      weakTopics: Array.isArray(body.weakTopics) ? body.weakTopics.slice(0, 6) : [],
+      weakTopics: sanitizeTopicList(Array.isArray(body.weakTopics) ? body.weakTopics : []),
       results: Array.isArray(body.results) ? body.results.slice(0, MAX_RESULTS) : [],
     }
 
@@ -205,6 +239,17 @@ export async function POST(request: Request) {
       )
     }
 
+    await logSecurityEvent({
+      eventType: "ai_inference_started",
+      feature: "ai_coach",
+      inferenceId,
+      districtId: session.districtId,
+      purpose,
+      model,
+      resultCount: payload.results.length,
+      policyVersion: AI_GOVERNANCE_POLICY.policyVersion,
+    })
+
     const prompt = buildCoachPrompt(payload)
     const feedback =
       model === "claude-4"
@@ -212,20 +257,38 @@ export async function POST(request: Request) {
         : await callOpenAi(prompt)
 
     await logSecurityEvent({
-      eventType: "ai_coach_feedback_generated",
+      eventType: "ai_inference_completed",
+      feature: "ai_coach",
+      inferenceId,
+      districtId: session.districtId,
+      purpose,
       model,
       resultCount: payload.results.length,
       weakTopicCount: payload.weakTopics.length,
+      requiresHumanReview: true,
+      architecture: AI_GOVERNANCE_POLICY.architecture,
+      processingBoundary: AI_GOVERNANCE_POLICY.processingBoundary,
     })
 
     return NextResponse.json({
       model,
       providerLabel: getCoachModelLabel(model),
       feedback,
+      compliance: {
+        purpose,
+        districtId: session.districtId,
+        requiresHumanReview: true,
+        policyVersion: AI_GOVERNANCE_POLICY.policyVersion,
+      },
+      audit: {
+        inferenceId,
+      },
     })
-  } catch {
+  } catch (error) {
     await logSecurityEvent({
-      eventType: "ai_coach_error",
+      eventType: "ai_inference_failed",
+      feature: "ai_coach",
+      errorMessage: error instanceof Error ? error.message : "unknown",
     })
     return NextResponse.json(
       { message: "Unable to generate AI coaching feedback right now." },
@@ -235,6 +298,10 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
+  const session = await getServerSession()
+  if (!session) {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+  }
   const hasOpenAi = Boolean(process.env.OPENAI_API_KEY)
   const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY)
 
