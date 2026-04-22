@@ -117,3 +117,11 @@ model TrialRunSnapshot {
   @@index([userId, createdAt])
   @@index([districtId, deletedAt, createdAt])
 }
+
+model WaitlistSubmission {
+  id        String   @id @default(cuid())
+  fullName  String?
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
