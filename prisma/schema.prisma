@@ -96,6 +96,15 @@ model DistrictPolicySnapshot {
   @@index([districtId, createdAt])
 }
 
+model WaitlistEntry {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  fullName    String?
+  submittedAt DateTime @default(now())
+
+  @@index([submittedAt])
+}
+
 model TrialRunSnapshot {
   id          String   @id @default(cuid())
   districtId  String

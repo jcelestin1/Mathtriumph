@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
+import { prisma } from "@/lib/server/prisma"
+
 type WaitlistPayload = {
   fullName?: string
   email?: string
@@ -17,12 +19,10 @@ export async function POST(request: Request) {
     const fullName = body.fullName?.trim() ?? ""
     const email = body.email.trim().toLowerCase()
 
-    // Temporary endpoint: currently logs submissions to the server console.
-    // TODO: Replace with workspace email or CRM integration when available.
-    console.log("[waitlist] new submission", {
-      fullName: fullName || undefined,
-      email,
-      submittedAt: new Date().toISOString(),
+    await prisma.waitlistEntry.upsert({
+      where: { email },
+      update: { fullName: fullName || null },
+      create: { email, fullName: fullName || null },
     })
 
     return NextResponse.json({
