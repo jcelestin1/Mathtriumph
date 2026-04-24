@@ -7,3 +7,4 @@
 {"timestamp":"2026-04-19T01:17:03.261Z","eventType":"auth_login_error"}
 {"timestamp":"2026-04-19T01:17:05.633Z","eventType":"auth_login_error"}
 {"timestamp":"2026-04-19T01:18:58.692Z","eventType":"auth_login_error"}
+{"timestamp":"2026-04-24T23:20:15.408Z","sequence":1,"prevHash":"GENESIS","eventType":"exam_hardware_warning","attemptId":"algebra-geometry-foundations-monitor-1777072720337-fpibpo","quizId":"algebra-geometry-foundations","severity":"medium","detail":"devicePixelRatio 0.984375 is below 1 — likely projector/TV downscale.","metadata":{"screenWidth":1951,"screenHeight":1220,"dpr":0.984375},"userId":"cmodihf6h00083ujsaxvle02y","districtId":"fl-demo-district","role":"student","eventClientTimestamp":"2026-04-24T23:20:10.374Z","eventHash":"865d88b13a88a1d13419147101449683a04eae73b0cc151e54a8789a56c92f38"}

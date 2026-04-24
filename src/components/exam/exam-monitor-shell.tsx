@@ -89,6 +89,7 @@ export function ExamMonitorShell({
   const [hardwareWarning, setHardwareWarning] = useState<HardwareCheckResult | null>(null)
   const [showHardwareModal, setShowHardwareModal] = useState(false)
   const [penaltyCount, setPenaltyCount] = useState(0)
+  const dismissedHardwareSignatureRef = useRef<string>("")
   const [focusLost, setFocusLost] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
 
@@ -264,8 +265,18 @@ export function ExamMonitorShell({
           ],
         }
         if (merged.suspiciousReasons.length || merged.isMultiMonitor) {
+          // Build a stable signature so we don't re-pop the modal when the
+          // hardware looks identical to last time the student dismissed it.
+          // We still log every check to the audit trail.
+          const signature = JSON.stringify({
+            r: merged.suspiciousReasons,
+            mm: merged.isMultiMonitor,
+            ts: merged.totalScreens ?? 0,
+          })
           setHardwareWarning(merged)
-          setShowHardwareModal(true)
+          if (signature !== dismissedHardwareSignatureRef.current) {
+            setShowHardwareModal(true)
+          }
           dispatch({
             type: "hardware_warning",
             severity: merged.isMultiMonitor ? "high" : "medium",
@@ -427,7 +438,7 @@ export function ExamMonitorShell({
 
       {lockdown.active ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/40 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-background/40 backdrop-blur-sm p-4"
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="exam-penalty-title"
@@ -479,7 +490,19 @@ export function ExamMonitorShell({
         </div>
       ) : null}
 
-      <Dialog open={showHardwareModal} onOpenChange={setShowHardwareModal}>
+      <Dialog
+        open={showHardwareModal && !lockdown.active}
+        onOpenChange={(open) => {
+          setShowHardwareModal(open)
+          if (!open && hardwareWarning) {
+            dismissedHardwareSignatureRef.current = JSON.stringify({
+              r: hardwareWarning.suspiciousReasons,
+              mm: hardwareWarning.isMultiMonitor,
+              ts: hardwareWarning.totalScreens ?? 0,
+            })
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="inline-flex items-center gap-2 text-rose-600">
@@ -504,7 +527,18 @@ export function ExamMonitorShell({
             </ul>
           ) : null}
           <DialogFooter>
-            <Button onClick={() => setShowHardwareModal(false)}>
+            <Button
+              onClick={() => {
+                if (hardwareWarning) {
+                  dismissedHardwareSignatureRef.current = JSON.stringify({
+                    r: hardwareWarning.suspiciousReasons,
+                    mm: hardwareWarning.isMultiMonitor,
+                    ts: hardwareWarning.totalScreens ?? 0,
+                  })
+                }
+                setShowHardwareModal(false)
+              }}
+            >
               <AlertOctagon className="mr-1 size-4" />
               I understand
             </Button>
