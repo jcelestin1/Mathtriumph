@@ -151,37 +151,37 @@ async function seed() {
 
     if (!persistedProgram) continue
 
-    for (const module of program.modules) {
+    for (const recoveryModule of program.modules) {
       await prisma.creditRecoveryModule.upsert({
         where: {
           programId_slug: {
             programId: persistedProgram.id,
-            slug: module.slug,
+            slug: recoveryModule.slug,
           },
         },
         update: {
-          title: module.title,
-          description: module.description,
-          sequence: module.sequence,
-          benchmarkCode: module.benchmarkCode,
-          reportingCategory: module.reportingCategory,
-          prerequisiteSkills: module.prerequisiteSkills,
-          masteryThreshold: module.masteryThreshold,
-          estimatedMinutes: module.estimatedMinutes,
-          supports: module.supports,
+          title: recoveryModule.title,
+          description: recoveryModule.description,
+          sequence: recoveryModule.sequence,
+          benchmarkCode: recoveryModule.benchmarkCode,
+          reportingCategory: recoveryModule.reportingCategory,
+          prerequisiteSkills: recoveryModule.prerequisiteSkills,
+          masteryThreshold: recoveryModule.masteryThreshold,
+          estimatedMinutes: recoveryModule.estimatedMinutes,
+          supports: recoveryModule.supports,
         },
         create: {
           programId: persistedProgram.id,
-          slug: module.slug,
-          title: module.title,
-          description: module.description,
-          sequence: module.sequence,
-          benchmarkCode: module.benchmarkCode,
-          reportingCategory: module.reportingCategory,
-          prerequisiteSkills: module.prerequisiteSkills,
-          masteryThreshold: module.masteryThreshold,
-          estimatedMinutes: module.estimatedMinutes,
-          supports: module.supports,
+          slug: recoveryModule.slug,
+          title: recoveryModule.title,
+          description: recoveryModule.description,
+          sequence: recoveryModule.sequence,
+          benchmarkCode: recoveryModule.benchmarkCode,
+          reportingCategory: recoveryModule.reportingCategory,
+          prerequisiteSkills: recoveryModule.prerequisiteSkills,
+          masteryThreshold: recoveryModule.masteryThreshold,
+          estimatedMinutes: recoveryModule.estimatedMinutes,
+          supports: recoveryModule.supports,
         },
       })
     }

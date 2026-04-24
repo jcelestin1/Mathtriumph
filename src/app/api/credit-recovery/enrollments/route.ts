@@ -1,3 +1,4 @@
+import { CreditRecoveryEnrollmentStatus, CreditRecoveryReason } from "@prisma/client"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 
@@ -6,7 +7,6 @@ import { logSecurityEvent } from "@/lib/security/audit-log"
 import { getServerSession } from "@/lib/security/auth-server"
 import { checkRateLimit } from "@/lib/security/rate-limit"
 import {
-  CreditRecoveryEnrollmentStatus,
   assignCreditRecoveryEnrollment,
   listCreditRecoveryEnrollments,
 } from "@/lib/server/credit-recovery"
@@ -20,12 +20,7 @@ const EnrollmentQuerySchema = z.object({
 const EnrollmentCreateSchema = z.object({
   studentUserId: z.string().min(1),
   programSlug: z.string().min(1),
-  reason: z.enum([
-    "credit_recovery",
-    "grade_forgiveness",
-    "eoc_remediation",
-    "bridge_readiness",
-  ]),
+  reason: z.nativeEnum(CreditRecoveryReason),
   originalCourseCode: z.string().trim().min(1).max(32).optional(),
   originalCourseName: z.string().trim().min(1).max(120).optional(),
   targetCompletionAt: z.string().datetime().optional(),

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server"
 import { CreditRecoveryProgressStatus } from "@prisma/client"
+import type { Prisma } from "@prisma/client"
 import { z } from "zod"
 
 import { hasPermission } from "@/lib/rbac"
 import { logSecurityEvent } from "@/lib/security/audit-log"
 import { getServerSession } from "@/lib/security/auth-server"
 import { checkRateLimit } from "@/lib/security/rate-limit"
-import { updateCreditRecoveryProgress } from "@/lib/server/credit-recovery"
+import { updateCreditRecoveryEnrollmentProgress } from "@/lib/server/credit-recovery"
 
 const ProgressPatchSchema = z.object({
   moduleId: z.string().min(1),
@@ -22,7 +23,7 @@ export const runtime = "nodejs"
 
 export async function PATCH(
   request: Request,
-  context: RouteContext<"/api/credit-recovery/enrollments/[enrollmentId]">
+  { params }: { params: Promise<{ enrollmentId: string }> }
 ) {
   const session = await getServerSession()
   if (!session) {
@@ -50,9 +51,9 @@ export async function PATCH(
   }
 
   try {
-    const { enrollmentId } = await context.params
+    const { enrollmentId } = await params
     const payload = ProgressPatchSchema.parse(await request.json())
-    const enrollment = await updateCreditRecoveryProgress({
+    const enrollment = await updateCreditRecoveryEnrollmentProgress({
       districtId: session.districtId,
       enrollmentId,
       moduleId: payload.moduleId,
@@ -60,7 +61,7 @@ export async function PATCH(
       diagnosticScore: payload.diagnosticScore,
       masteryScore: payload.masteryScore,
       benchmarkReady: payload.benchmarkReady,
-      evidence: payload.evidence,
+      evidence: payload.evidence as Prisma.InputJsonValue | undefined,
       teacherNotes: payload.teacherNotes,
     })
 
