@@ -5,6 +5,8 @@ import { PrismaClient } from "@prisma/client"
 import { hash } from "bcryptjs"
 import { Pool } from "pg"
 
+import { creditRecoveryCatalog } from "./credit-recovery-catalog.mjs"
+
 const connectionString =
   process.env.DATABASE_URL ??
   "postgresql://mathtriumph_app:mathtriumph_local_dev_pw@localhost:5432/mathtriumph"
@@ -93,6 +95,96 @@ async function seed() {
         passwordHash,
       },
     })
+  }
+
+  for (const program of creditRecoveryCatalog) {
+    await prisma.creditRecoveryProgram.upsert({
+      where: {
+        districtId_slug: {
+          districtId: "catalog",
+          slug: program.slug,
+        },
+      },
+      update: {
+        title: program.title,
+        description: program.description,
+        subjectArea: program.subjectArea,
+        floridaCourseCode: program.floridaCourseCode,
+        recoveryType: program.recoveryType,
+        eocCourse: program.eocCourse,
+        gradeBandStart: program.gradeBandStart,
+        gradeBandEnd: program.gradeBandEnd,
+        standardsFramework: program.standardsFramework,
+        transcriptEligible: program.transcriptEligible,
+        masteryModel: program.masteryModel,
+        supportModel: program.supportModel,
+        policyConfig: program.policyConfig,
+      },
+      create: {
+        districtId: "catalog",
+        slug: program.slug,
+        title: program.title,
+        description: program.description,
+        subjectArea: program.subjectArea,
+        floridaCourseCode: program.floridaCourseCode,
+        recoveryType: program.recoveryType,
+        eocCourse: program.eocCourse,
+        gradeBandStart: program.gradeBandStart,
+        gradeBandEnd: program.gradeBandEnd,
+        standardsFramework: program.standardsFramework,
+        transcriptEligible: program.transcriptEligible,
+        masteryModel: program.masteryModel,
+        supportModel: program.supportModel,
+        policyConfig: program.policyConfig,
+      },
+    })
+
+    const persistedProgram = await prisma.creditRecoveryProgram.findUnique({
+      where: {
+        districtId_slug: {
+          districtId: "catalog",
+          slug: program.slug,
+        },
+      },
+      select: { id: true },
+    })
+
+    if (!persistedProgram) continue
+
+    for (const module of program.modules) {
+      await prisma.creditRecoveryModule.upsert({
+        where: {
+          programId_slug: {
+            programId: persistedProgram.id,
+            slug: module.slug,
+          },
+        },
+        update: {
+          title: module.title,
+          description: module.description,
+          sequence: module.sequence,
+          benchmarkCode: module.benchmarkCode,
+          reportingCategory: module.reportingCategory,
+          prerequisiteSkills: module.prerequisiteSkills,
+          masteryThreshold: module.masteryThreshold,
+          estimatedMinutes: module.estimatedMinutes,
+          supports: module.supports,
+        },
+        create: {
+          programId: persistedProgram.id,
+          slug: module.slug,
+          title: module.title,
+          description: module.description,
+          sequence: module.sequence,
+          benchmarkCode: module.benchmarkCode,
+          reportingCategory: module.reportingCategory,
+          prerequisiteSkills: module.prerequisiteSkills,
+          masteryThreshold: module.masteryThreshold,
+          estimatedMinutes: module.estimatedMinutes,
+          supports: module.supports,
+        },
+      })
+    }
   }
 
   console.log("Seed complete. Demo users are ready.")

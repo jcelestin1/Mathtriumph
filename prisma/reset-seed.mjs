@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { PrismaClient } from "@prisma/client"
 import { hash } from "bcryptjs"
 import { Pool } from "pg"
+import { seedCreditRecoveryCatalog } from "./credit-recovery-catalog.mjs"
 
 const connectionString =
   process.env.DATABASE_URL ??
@@ -78,6 +79,10 @@ async function resetAndSeed() {
   const passwordHash = await hash(DEFAULT_PASSWORD, HASH_ROUNDS)
 
   await prisma.$transaction([
+    prisma.creditRecoveryEnrollmentProgress.deleteMany({}),
+    prisma.creditRecoveryEnrollment.deleteMany({}),
+    prisma.creditRecoveryModule.deleteMany({}),
+    prisma.creditRecoveryProgram.deleteMany({}),
     prisma.passwordResetToken.deleteMany({}),
     prisma.user.deleteMany({}),
   ])
@@ -93,6 +98,8 @@ async function resetAndSeed() {
       },
     })
   }
+
+  await seedCreditRecoveryCatalog(prisma)
 
   console.log("Reset + seed complete. Demo users recreated.")
   console.log(`Default password for all seeded users: ${DEFAULT_PASSWORD}`)
