@@ -153,6 +153,21 @@ export type EocPrediction = {
   topRiskReportingCategories?: string[]
 }
 
+export type ExamMonitorSummary = {
+  /** Total number of 2-second heartbeats received during the exam. */
+  heartbeatCount: number
+  /** Number of distinct focus-loss / tab-out events. */
+  focusLossCount: number
+  /** True if a hardware warning (secondary display / TV / HDMI) was detected. */
+  hardwareWarningDetected: boolean
+  /** ISO timestamps of each focus-loss event. */
+  focusLossTimestamps: string[]
+  /** Total milliseconds spent outside the exam tab. */
+  totalAbsenceMs: number
+  /** Whether the camera monitoring stream was active. */
+  cameraActive: boolean
+}
+
 export type QuizAttempt = {
   attemptId: string
   quizId: string
@@ -179,6 +194,8 @@ export type QuizAttempt = {
   integrityReview?: IntegrityReview
   errorAnalyses?: ErrorAnalysisEntry[]
   eocPrediction?: EocPrediction
+  /** High-security exam monitor telemetry summary attached at submission time. */
+  examMonitor?: ExamMonitorSummary
 }
 
 const algebraGeometryFoundations: QuizDefinition = {

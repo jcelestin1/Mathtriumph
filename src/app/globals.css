@@ -141,3 +141,82 @@
     @apply border border-border/70 bg-background/85 shadow-[0_8px_30px_rgb(2_132_199/0.08)] backdrop-blur;
   }
 }
+
+/* ── Exam Monitor – GPU-accelerated CSS-only lock ────────────────────────────
+   Using CSS filters avoids heavy DOM mutations; the browser composites these
+   on the GPU layer without reflowing the quiz tree.                          */
+@layer components {
+  /* Blurred, non-interactive quiz surface during penalty phase */
+  .exam-content-blurred {
+    filter: blur(18px) brightness(0.55) saturate(0.4);
+    pointer-events: none;
+    user-select: none;
+    /* Promote to its own compositing layer so blur never affects the overlay */
+    will-change: filter;
+    transition: filter 0.3s ease;
+  }
+
+  /* Full-viewport lock-screen overlay */
+  .exam-lockscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: oklch(0.08 0.02 245 / 0.78);
+    backdrop-filter: blur(6px);
+  }
+
+  .exam-lockscreen-panel {
+    width: 100%;
+    max-width: 36rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid oklch(1 0 0 / 14%);
+    background: var(--card);
+    color: var(--card-foreground);
+    padding: 2rem;
+    box-shadow: 0 25px 60px oklch(0 0 0 / 0.5);
+  }
+
+  /* Small floating badge – top-right corner */
+  .exam-camera-badge {
+    position: fixed;
+    bottom: 0.75rem;
+    right: 4.5rem;
+    z-index: 50;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: var(--background);
+    font-size: 0.625rem;
+    color: var(--muted-foreground);
+    box-shadow: 0 1px 6px oklch(0 0 0 / 0.12);
+    pointer-events: none;
+  }
+
+  .exam-session-badge {
+    position: fixed;
+    bottom: 0.75rem;
+    right: 0.75rem;
+    z-index: 50;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid oklch(0.72 0.12 170 / 0.5);
+    background: oklch(0.97 0.01 220);
+    font-size: 0.625rem;
+    box-shadow: 0 1px 6px oklch(0 0 0 / 0.1);
+    pointer-events: none;
+  }
+
+  .dark .exam-session-badge {
+    background: oklch(0.26 0.02 242);
+  }
+}

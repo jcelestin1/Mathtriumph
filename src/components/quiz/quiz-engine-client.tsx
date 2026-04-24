@@ -11,7 +11,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { BlockMath } from "react-katex"
 
 import "katex/dist/katex.min.css"
@@ -29,6 +29,7 @@ import {
   type AntiCheatFlag,
   type EocPrediction,
   type ErrorAnalysisEntry,
+  type ExamMonitorSummary,
   type QuestionResult,
   type QuestionWorkEntry,
   type QuizAttempt,
@@ -36,7 +37,9 @@ import {
 } from "@/lib/quiz-engine"
 import { getDashboardPathByRole } from "@/lib/demo-auth"
 import { saveQuizAttempt, syncQuizAttempts } from "@/lib/quiz-storage"
+import { useExamMonitor, type MonitorEvent } from "@/hooks/use-exam-monitor"
 import { DualStreamErrorAnalysis } from "@/components/quiz/dual-stream-error-analysis"
+import { ExamMonitorShell } from "@/components/quiz/exam-monitor-shell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -85,6 +88,23 @@ export function QuizEngineClient({ quiz }: Props) {
   const [aiStatus, setAiStatus] = useState<AiStatusResponse | null>(null)
   const [analysisTeacherAction, setAnalysisTeacherAction] = useState("")
   const [recentAttempts, setRecentAttempts] = useState<QuizAttempt[]>([])
+
+  // ── Exam monitor ─────────────────────────────────────────────────────────────
+  // examActive drives the ExamMonitorShell – it becomes true once the student
+  // begins the quiz (on mount) and false after the attempt is submitted.
+  const [examActive, setExamActive] = useState(true)
+  const monitorEventsRef = useRef<MonitorEvent[]>([])
+
+  const handleMonitorBatchLog = useMemo(
+    () => (events: MonitorEvent[]) => {
+      monitorEventsRef.current = [...monitorEventsRef.current, ...events]
+    },
+    []
+  )
+
+  const { state: monitorState } = useExamMonitor({
+    onBatchLog: handleMonitorBatchLog,
+  })
 
   const currentQuestion = sessionQuiz.questions[currentIndex]
   const isCompleted = Boolean(submittedAttempt)
@@ -293,6 +313,9 @@ export function QuizEngineClient({ quiz }: Props) {
   }
 
   async function handleSubmitAttempt() {
+    // Deactivate monitoring as soon as attempt is submitted.
+    setExamActive(false)
+
     trackQuestionExitTime(currentQuestion.id)
     const completedAt = new Date().toISOString()
     const elapsedSeconds = Math.max(
@@ -336,6 +359,46 @@ export function QuizEngineClient({ quiz }: Props) {
     const similarityFlag = buildSimilarityFlag(questionWorkPayload)
     if (similarityFlag) {
       antiCheatFlags.push(similarityFlag)
+    }
+
+    // ── Monitor-derived anti-cheat flags ──────────────────────────────────────
+    const focusLossCount = monitorState.focusLossCount
+    const allEvents = monitorEventsRef.current
+    const totalAbsenceMs = allEvents
+      .filter((e): e is { kind: "focus_restored"; ts: number; durationMs: number } =>
+        e.kind === "focus_restored"
+      )
+      .reduce((sum, e) => sum + e.durationMs, 0)
+
+    if (focusLossCount >= 1) {
+      antiCheatFlags.push({
+        id: "focus-loss-detected",
+        label: `Focus lost ${focusLossCount} time${focusLossCount > 1 ? "s" : ""} during exam`,
+        detail: `Student left the exam tab ${focusLossCount} time${focusLossCount > 1 ? "s" : ""}, totalling ${Math.round(totalAbsenceMs / 1000)} s of absence. Each event was logged with penalty enforcement.`,
+        severity: focusLossCount >= 3 ? "high" : focusLossCount >= 2 ? "medium" : "low",
+      })
+    }
+    if (monitorState.hwWarning) {
+      antiCheatFlags.push({
+        id: "hardware-warning",
+        label: "Secondary display or HDMI detected",
+        detail: `Hardware warning type: ${monitorState.hwWarning}. Student was shown the "You aren't slick" modal.`,
+        severity: "medium",
+      })
+    }
+
+    // ── Build monitor summary to attach to attempt ────────────────────────────
+    const focusLossTimestamps = allEvents
+      .filter((e) => e.kind === "focus_lost")
+      .map((e) => new Date(e.ts).toISOString())
+
+    const examMonitor: ExamMonitorSummary = {
+      heartbeatCount: monitorState.heartbeatCount,
+      focusLossCount,
+      hardwareWarningDetected: Boolean(monitorState.hwWarning),
+      focusLossTimestamps,
+      totalAbsenceMs,
+      cameraActive: false,  // camera state is managed inside ExamMonitorShell
     }
     let errorAnalyses: ErrorAnalysisEntry[] = []
     let eocPrediction: EocPrediction | undefined
@@ -390,6 +453,7 @@ export function QuizEngineClient({ quiz }: Props) {
       integrityReview: { status: "pending" },
       errorAnalyses,
       eocPrediction,
+      examMonitor,
     }
 
     await saveQuizAttempt(attempt)
@@ -489,6 +553,7 @@ export function QuizEngineClient({ quiz }: Props) {
     (answers[currentQuestion.id] ?? "").trim().length > 0
 
   return (
+    <ExamMonitorShell active={examActive} quizId={sessionQuiz.id}>
     <section className="mx-auto w-full max-w-4xl space-y-4">
       <Card className="border-teal-200/70">
         <CardHeader className="space-y-3">
@@ -563,6 +628,26 @@ export function QuizEngineClient({ quiz }: Props) {
                       • {flag.label} ({flag.severity}) - {flag.detail}
                     </p>
                   ))}
+                </div>
+              </div>
+            ) : null}
+            {submittedAttempt.examMonitor ? (
+              <div className="rounded-lg border border-slate-300/70 bg-slate-50/50 p-3 text-sm dark:bg-slate-500/10">
+                <p className="mb-2 inline-flex items-center gap-1 font-medium text-slate-700 dark:text-slate-300">
+                  <ShieldAlert className="size-4" />
+                  Exam Monitor Summary
+                </p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-muted-foreground">
+                  <span>Heartbeats received:</span>
+                  <span className="font-mono">{submittedAttempt.examMonitor.heartbeatCount}</span>
+                  <span>Focus-loss events:</span>
+                  <span className="font-mono">{submittedAttempt.examMonitor.focusLossCount}</span>
+                  <span>Total absence:</span>
+                  <span className="font-mono">{Math.round(submittedAttempt.examMonitor.totalAbsenceMs / 1000)} s</span>
+                  <span>Camera monitoring:</span>
+                  <span className="font-mono">{submittedAttempt.examMonitor.cameraActive ? "Active" : "Unavailable"}</span>
+                  <span>HW warning:</span>
+                  <span className="font-mono">{submittedAttempt.examMonitor.hardwareWarningDetected ? "Yes" : "None"}</span>
                 </div>
               </div>
             ) : null}
@@ -868,5 +953,6 @@ export function QuizEngineClient({ quiz }: Props) {
         </Card>
       )}
     </section>
+    </ExamMonitorShell>
   )
 }
