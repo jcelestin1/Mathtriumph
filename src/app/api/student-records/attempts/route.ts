@@ -2,6 +2,10 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 
 import type { QuizAttempt } from "@/lib/quiz-engine"
+import {
+  type ProctoringEvent,
+  type ProctoringSummary,
+} from "@/lib/exam-security"
 import { checkRateLimit } from "@/lib/security/rate-limit"
 import { getServerSession } from "@/lib/security/auth-server"
 import {
@@ -45,6 +49,44 @@ const MinimalAttemptSchema = z.object({
   integrityReview: z.any().optional(),
   errorAnalyses: z.array(z.any()).optional(),
   eocPrediction: z.any().optional(),
+  proctoringEvents: z.array(z.any()).optional(),
+  proctoringSummary: z.any().optional(),
+})
+
+const ProctoringEventSchema = z.object({
+  type: z.enum([
+    "heartbeat",
+    "focus_lost",
+    "focus_restored",
+    "reentry_requested",
+    "reentry_submitted",
+    "hardware_warning",
+    "launch_blocked",
+    "camera_ready",
+    "camera_blocked",
+    "camera_snapshot",
+  ]),
+  timestamp: z.string().min(1),
+  detail: z.string().min(1).max(500),
+  severity: z.enum(["low", "medium", "high"]).optional(),
+  metadata: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+    .optional(),
+})
+
+const ProctoringBatchSchema = z.object({
+  attemptId: z.string().min(1),
+  quizId: z.string().min(1),
+  events: z.array(ProctoringEventSchema).min(1).max(50),
+  summary: z.object({
+    sessionId: z.string().min(1),
+    quizId: z.string().min(1),
+    focusLossCount: z.number().int().nonnegative(),
+    reEntryCount: z.number().int().nonnegative(),
+    hardwareWarnings: z.array(z.string()),
+    snapshotCount: z.number().int().nonnegative(),
+    maxSeverity: z.enum(["low", "medium", "high"]),
+  }),
 })
 
 export async function GET(request: Request) {
@@ -110,16 +152,45 @@ export async function PATCH(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
   }
-  if (!(session.role === "teacher" || session.role === "school_admin")) {
-    return NextResponse.json({ message: "Forbidden" }, { status: 403 })
-  }
 
   try {
-    const payload = ReviewPatchSchema.parse(await request.json())
-    await updateAttemptReview(payload.attemptId, {
-      status: payload.status,
-      notes: payload.notes,
-    })
+    const rawBody = await request.json()
+    const reviewParse = ReviewPatchSchema.safeParse(rawBody)
+    if (reviewParse.success) {
+      if (!(session.role === "teacher" || session.role === "school_admin")) {
+        return NextResponse.json({ message: "Forbidden" }, { status: 403 })
+      }
+      const payload = reviewParse.data
+      await updateAttemptReview(payload.attemptId, {
+        status: payload.status,
+        notes: payload.notes,
+      })
+      return NextResponse.json({ ok: true })
+    }
+
+    const batchPayload = ProctoringBatchSchema.parse(rawBody)
+    const attempts =
+      session.role === "teacher" || session.role === "school_admin"
+        ? await listDistrictAttempts(session.districtId)
+        : await listUserAttempts(session.districtId, session.userId)
+    const currentAttempt = attempts.find((attempt) => attempt.attemptId === batchPayload.attemptId)
+    if (!currentAttempt) {
+      return NextResponse.json({ message: "Attempt not found." }, { status: 404 })
+    }
+
+    const existingEvents = currentAttempt.proctoringEvents ?? []
+    const mergedAttempt: QuizAttempt = {
+      ...currentAttempt,
+      proctoringEvents: [...existingEvents, ...(batchPayload.events as ProctoringEvent[])].slice(-300),
+      proctoringSummary: batchPayload.summary as ProctoringSummary,
+    }
+
+    await upsertAttempt(
+      session.districtId,
+      session.userId,
+      session.role,
+      mergedAttempt
+    )
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ message: "Invalid review payload." }, { status: 400 })

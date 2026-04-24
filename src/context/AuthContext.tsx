@@ -7,19 +7,31 @@ import {
 } from "@/lib/demo-auth"
 import { type AppPermission } from "@/lib/rbac"
 
+type AuthLoginResult = {
+  isAuthenticated: boolean
+  role: DemoRole
+  districtId: string
+  permissions: string[]
+  redirectTo: string
+}
+
 type AuthContextValue = {
   isAuthenticated: boolean
   role: DemoRole
   districtId: string
   permissions: string[]
   isHydrated: boolean
-  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>
+  login: (
+    email: string,
+    password: string,
+    rememberMe?: boolean
+  ) => Promise<AuthLoginResult>
   loginAs: (
     role: DemoRole,
     rememberMe?: boolean,
     email?: string,
     password?: string
-  ) => Promise<void>
+  ) => Promise<AuthLoginResult>
   switchRole: (role: DemoRole) => Promise<void>
   logout: () => Promise<void>
   can: (permission: AppPermission) => boolean
@@ -97,7 +109,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!response.ok) {
       throw new Error("Login failed.")
     }
+    const json = (await response.json()) as AuthLoginResult
     await refreshSession()
+    return json
   }, [refreshSession])
 
   const loginAs = useCallback(async (
@@ -106,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email?: string,
     password?: string
   ) => {
-    await login(
+    return login(
       email ?? `${nextRole}@demo.mathtriumph.local`,
       password ?? "MathTriumph2026!",
       rememberMe

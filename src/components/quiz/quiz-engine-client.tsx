@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -22,6 +22,7 @@ import {
   getCoachModelLabel,
   type AiCoachModel,
 } from "@/lib/ai-coach"
+import { type ProctoringSeverity } from "@/lib/exam-security"
 import {
   createSessionQuiz,
   evaluateQuestion,
@@ -34,9 +35,12 @@ import {
   type QuizAttempt,
   type QuizDefinition,
 } from "@/lib/quiz-engine"
+import { readSecureExamSession } from "@/lib/secure-exam-session"
 import { getDashboardPathByRole } from "@/lib/demo-auth"
 import { saveQuizAttempt, syncQuizAttempts } from "@/lib/quiz-storage"
 import { DualStreamErrorAnalysis } from "@/components/quiz/dual-stream-error-analysis"
+import { QuizProctoringOverlay } from "@/components/quiz/quiz-proctoring-overlay"
+import { useQuizProctoring } from "@/components/quiz/use-quiz-proctoring"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -54,6 +58,7 @@ type AiStatusResponse = {
 
 export function QuizEngineClient({ quiz }: Props) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { role, districtId } = useAuth()
   const sessionSeed = useMemo(() => `${Date.now()}`, [])
   const sessionQuiz = useMemo(
@@ -85,10 +90,19 @@ export function QuizEngineClient({ quiz }: Props) {
   const [aiStatus, setAiStatus] = useState<AiStatusResponse | null>(null)
   const [analysisTeacherAction, setAnalysisTeacherAction] = useState("")
   const [recentAttempts, setRecentAttempts] = useState<QuizAttempt[]>([])
+  const [attemptId] = useState(() => `${sessionQuiz.id}-${Date.now()}`)
+  const secureMode = searchParams.get("mode") === "secure"
 
   const currentQuestion = sessionQuiz.questions[currentIndex]
   const isCompleted = Boolean(submittedAttempt)
   const progressPercent = ((currentIndex + 1) / sessionQuiz.questions.length) * 100
+
+  const proctoring = useQuizProctoring({
+    attemptId,
+    quizId: sessionQuiz.id,
+    secureMode,
+    isCompleted,
+  })
 
   useEffect(() => {
     if (isCompleted) return
@@ -110,6 +124,38 @@ export function QuizEngineClient({ quiz }: Props) {
       setRecentAttempts(attempts)
     })
   }, [])
+
+  useEffect(() => {
+    if (!secureMode) return
+    const session = readSecureExamSession()
+    if (!session) {
+      router.replace("/practice/quiz")
+    }
+  }, [router, secureMode])
+
+  useEffect(() => {
+    if (isCompleted) return
+
+    const draftAttempt: QuizAttempt = {
+      attemptId,
+      quizId: sessionQuiz.id,
+      role,
+      startedAt,
+      completedAt: startedAt,
+      elapsedSeconds: 0,
+      scorePercent: 0,
+      answers: {},
+      results: [],
+      questionWork: [],
+      antiCheatFlags: [],
+      oralVerificationPrompts: [],
+      integrityReview: { status: "pending" },
+      proctoringEvents: [],
+      proctoringSummary: proctoring.proctoringSummary,
+    }
+
+    void saveQuizAttempt(draftAttempt)
+  }, [attemptId, isCompleted, proctoring.proctoringSummary, role, sessionQuiz.id, startedAt])
 
   const formattedTime = useMemo(() => {
     const min = Math.floor(timeLeftSeconds / 60)
@@ -155,6 +201,7 @@ export function QuizEngineClient({ quiz }: Props) {
   }
 
   function canProceedCurrent() {
+    if (proctoring.isLocked) return false
     const answer = (answers[currentQuestion.id] ?? "").trim()
     const steps = (workShown[currentQuestion.id] ?? "").trim()
     const confidence = confidenceByQuestion[currentQuestion.id] ?? 0
@@ -293,6 +340,7 @@ export function QuizEngineClient({ quiz }: Props) {
   }
 
   async function handleSubmitAttempt() {
+    if (proctoring.isLocked) return
     trackQuestionExitTime(currentQuestion.id)
     const completedAt = new Date().toISOString()
     const elapsedSeconds = Math.max(
@@ -337,6 +385,23 @@ export function QuizEngineClient({ quiz }: Props) {
     if (similarityFlag) {
       antiCheatFlags.push(similarityFlag)
     }
+    const { events: proctoringEvents, summary: proctoringSummary } = proctoring.getSnapshot()
+    if (proctoringSummary.focusLossCount > 0) {
+      antiCheatFlags.push({
+        id: "secure-focus-loss",
+        label: "Secure session focus interruption",
+        detail: `${proctoringSummary.focusLossCount} focus interruptions and ${proctoringSummary.reEntryCount} re-entry submissions were recorded.`,
+        severity: proctoringSummary.maxSeverity as ProctoringSeverity,
+      })
+    }
+    if (proctoringSummary.hardwareWarnings.length > 0) {
+      antiCheatFlags.push({
+        id: "hardware-warning",
+        label: "Hardware warning profile",
+        detail: proctoringSummary.hardwareWarnings.join(" "),
+        severity: proctoringSummary.maxSeverity as ProctoringSeverity,
+      })
+    }
     let errorAnalyses: ErrorAnalysisEntry[] = []
     let eocPrediction: EocPrediction | undefined
     let inferredTeacherAction = ""
@@ -375,7 +440,7 @@ export function QuizEngineClient({ quiz }: Props) {
       })
 
     const attempt: QuizAttempt = {
-      attemptId: `${sessionQuiz.id}-${Date.now()}`,
+      attemptId,
       quizId: sessionQuiz.id,
       role,
       startedAt,
@@ -390,9 +455,12 @@ export function QuizEngineClient({ quiz }: Props) {
       integrityReview: { status: "pending" },
       errorAnalyses,
       eocPrediction,
+      proctoringEvents,
+      proctoringSummary,
     }
 
     await saveQuizAttempt(attempt)
+    await proctoring.flushPending()
     const latestAttempts = await syncQuizAttempts()
     setRecentAttempts(latestAttempts)
     setSubmittedAttempt(attempt)
@@ -490,6 +558,24 @@ export function QuizEngineClient({ quiz }: Props) {
 
   return (
     <section className="mx-auto w-full max-w-4xl space-y-4">
+      {secureMode ? (
+        <QuizProctoringOverlay
+          isLocked={proctoring.isLocked}
+          lockState={proctoring.lockState}
+          reentryJustification={proctoring.reentryJustification}
+          setReentryJustification={proctoring.setReentryJustification}
+          canSubmitReentry={proctoring.canSubmitReentry}
+          cooldownLabel={proctoring.cooldownLabel}
+          onSubmitReentry={() => {
+            void proctoring.submitReentry()
+          }}
+          hardwareWarningOpen={proctoring.hardwareWarningOpen}
+          setHardwareWarningOpen={proctoring.setHardwareWarningOpen}
+          hardwareWarningReasons={proctoring.hardwareWarningReasons}
+          totalEventCount={proctoring.totalEventCount}
+          cameraStatus={proctoring.cameraStatus}
+        />
+      ) : null}
       <Card className="border-teal-200/70">
         <CardHeader className="space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
@@ -497,10 +583,18 @@ export function QuizEngineClient({ quiz }: Props) {
               <CardTitle>{quiz.title}</CardTitle>
               <CardDescription>{quiz.subtitle}</CardDescription>
             </div>
-            <Badge variant="secondary">
-              <Clock3 className="mr-1 size-3.5" />
-              {formattedTime}
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              {secureMode ? (
+                <Badge className="bg-rose-600 text-white">
+                  <ShieldAlert className="mr-1 size-3.5" />
+                  Session Active
+                </Badge>
+              ) : null}
+              <Badge variant="secondary">
+                <Clock3 className="mr-1 size-3.5" />
+                {formattedTime}
+              </Badge>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {quiz.topics.map((topic) => (
@@ -694,7 +788,7 @@ export function QuizEngineClient({ quiz }: Props) {
           </CardContent>
         </Card>
       ) : (
-        <Card>
+        <Card className={secureMode ? "transition-[filter] duration-200" : undefined}>
           <CardHeader className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Badge variant="secondary">{currentQuestion.topic}</Badge>
@@ -725,6 +819,7 @@ export function QuizEngineClient({ quiz }: Props) {
                       key={option}
                       type="button"
                       onClick={() => updateAnswer(option)}
+                      disabled={proctoring.isLocked}
                       className={`rounded-md border p-2 text-left text-sm transition ${
                         active
                           ? "border-teal-500 bg-teal-50 text-teal-800 dark:bg-teal-500/10 dark:text-teal-200"
@@ -741,6 +836,7 @@ export function QuizEngineClient({ quiz }: Props) {
                 value={answers[currentQuestion.id] ?? ""}
                 onChange={(event) => updateAnswer(event.target.value)}
                 placeholder="Type your final answer..."
+                disabled={proctoring.isLocked}
               />
             )}
             <textarea
@@ -754,6 +850,7 @@ export function QuizEngineClient({ quiz }: Props) {
               rows={3}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
               placeholder="Show your steps (required): write how you solved this question."
+              disabled={proctoring.isLocked}
             />
             <Input
               value={reasoningNotes[currentQuestion.id] ?? ""}
@@ -764,12 +861,14 @@ export function QuizEngineClient({ quiz }: Props) {
                 }))
               }
               placeholder="Reasoning check (optional): Why is your answer correct?"
+              disabled={proctoring.isLocked}
             />
             <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">Confidence:</span>
               <select
                 className="rounded-md border border-border bg-background px-2 py-1"
                 value={confidenceByQuestion[currentQuestion.id] ?? ""}
+                disabled={proctoring.isLocked}
                 onChange={(event) =>
                   setConfidenceByQuestion((prev) => ({
                     ...prev,

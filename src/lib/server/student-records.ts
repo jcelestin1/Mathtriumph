@@ -57,7 +57,15 @@ export async function upsertAttempt(
   const key = userKey(districtId, userId)
   const current = store.records[key] ?? { role, attempts: [] }
   current.role = role
-  current.attempts = [attempt, ...current.attempts].slice(0, 300)
+  const existingIndex = current.attempts.findIndex(
+    (entry) => entry.attemptId === attempt.attemptId
+  )
+  if (existingIndex >= 0) {
+    current.attempts[existingIndex] = attempt
+  } else {
+    current.attempts.unshift(attempt)
+  }
+  current.attempts = current.attempts.slice(0, 300)
   store.records[key] = current
   await writeStore(store)
 }

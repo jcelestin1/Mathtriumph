@@ -8,6 +8,7 @@ import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 
 import { useAuth } from "@/context/AuthContext"
+import { launchSecureExamWindow } from "@/lib/secure-exam-session"
 import { loginSchema, type LoginSchema } from "@/lib/auth-schema"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -38,8 +39,17 @@ export function LoginForm() {
     setIsLoading(true)
 
     try {
-      await login(values.email, values.password, values.rememberMe)
-      router.push("/dashboard")
+      const authResult = await login(values.email, values.password, values.rememberMe)
+      if (authResult.role === "student") {
+        const secureLaunch = launchSecureExamWindow("/practice/quiz?mode=secure")
+        if (secureLaunch.opened) {
+          router.replace("/session-active")
+          return
+        }
+        router.push("/practice/quiz?mode=secure")
+        return
+      }
+      router.push(authResult.redirectTo)
     } catch {
       setAuthError("Unable to sign in. Please verify credentials and retry.")
     } finally {

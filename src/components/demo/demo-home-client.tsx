@@ -18,6 +18,7 @@ import { useState } from "react"
 
 import { useAuth } from "@/context/AuthContext"
 import { type DemoRole, getDashboardPathByRole } from "@/lib/demo-auth"
+import { launchSecureExamWindow } from "@/lib/secure-exam-session"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { RoleSwitcher } from "@/components/ui/role-switcher"
 import { Badge } from "@/components/ui/badge"
@@ -113,13 +114,20 @@ export function DemoHomeClient() {
   const launchRole = async (targetRole: ShowcaseRole) => {
     setLoadingRole(targetRole)
     try {
-      await loginAs(
+      const result = await loginAs(
         targetRole as DemoRole,
         true,
         `${targetRole}@demo.mathtriumph.local`,
         "MathTriumph2026!"
       )
-      router.push(getDashboardPathByRole(targetRole))
+      if (targetRole === "student") {
+        const secureLaunch = launchSecureExamWindow("/practice/quiz")
+        if (secureLaunch.opened) {
+          window.location.replace("about:blank")
+          return
+        }
+      }
+      router.push(result.redirectTo ?? getDashboardPathByRole(targetRole))
     } finally {
       setLoadingRole(null)
     }

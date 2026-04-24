@@ -1,10 +1,10 @@
 "use client"
 
 import { Heart, User, Users } from "lucide-react"
-import { useRouter } from "next/navigation"
 
 import { useAuth } from "@/context/AuthContext"
-import { type DemoRole, getDashboardPathByRole } from "@/lib/demo-auth"
+import { type DemoRole } from "@/lib/demo-auth"
+import { launchSecureExamWindow, writeSecureExamSession } from "@/lib/secure-exam-session"
 import { Button } from "@/components/ui/button"
 
 const quickRoles: {
@@ -18,7 +18,6 @@ const quickRoles: {
 ]
 
 export function DemoLoginButtons() {
-  const router = useRouter()
   const { loginAs } = useAuth()
 
   return (
@@ -34,8 +33,21 @@ export function DemoLoginButtons() {
             variant="outline"
             className="justify-start border-teal-200 bg-white/90 text-xs text-teal-900 hover:bg-teal-100 dark:border-teal-500/30 dark:bg-transparent dark:text-teal-100"
             onClick={async () => {
-              await loginAs(role, true, `${role}@demo.mathtriumph.local`, "MathTriumph2026!")
-              router.push(getDashboardPathByRole(role))
+              const result = await loginAs(
+                role,
+                true,
+                `${role}@demo.mathtriumph.local`,
+                "MathTriumph2026!"
+              )
+              if (role === "student") {
+                const opened = launchSecureExamWindow("/practice/quiz?mode=secure")
+                if (opened.opened) {
+                  window.location.replace("about:blank")
+                  return
+                }
+              }
+              writeSecureExamSession("login")
+              window.location.assign(result.redirectTo)
             }}
           >
             <Icon className="mr-1 size-4" />

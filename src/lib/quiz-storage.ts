@@ -1,4 +1,5 @@
 import type { IntegrityReviewStatus, QuizAttempt } from "@/lib/quiz-engine"
+import type { ProctoringEvent, ProctoringSummary } from "@/lib/exam-security"
 
 let cachedAttempts: QuizAttempt[] = []
 
@@ -26,14 +27,33 @@ export async function syncQuizAttempts() {
   }
 }
 
-export async function saveQuizAttempt(attempt: QuizAttempt) {
+export async function saveQuizAttempt(
+  attempt: QuizAttempt,
+  options?: { syncAfter?: boolean }
+) {
   if (typeof window === "undefined") return
   await fetch("/api/student-records/attempts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ attempt }),
   })
-  await syncQuizAttempts()
+  if (options?.syncAfter !== false) {
+    await syncQuizAttempts()
+  }
+}
+
+export async function appendProctoringBatch(payload: {
+  attemptId: string
+  quizId: string
+  events: ProctoringEvent[]
+  summary: ProctoringSummary
+}) {
+  if (typeof window === "undefined" || payload.events.length === 0) return
+  await fetch("/api/student-records/attempts", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function updateAttemptIntegrityReview(

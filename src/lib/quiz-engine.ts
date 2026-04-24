@@ -1,3 +1,5 @@
+import type { ProctoringEvent, ProctoringSummary } from "@/lib/exam-security"
+
 export type QuestionType = "multiple_choice" | "free_response"
 export type EocCourse = "Geometry" | "Algebra 1"
 export type MisconceptionType =
@@ -179,6 +181,8 @@ export type QuizAttempt = {
   integrityReview?: IntegrityReview
   errorAnalyses?: ErrorAnalysisEntry[]
   eocPrediction?: EocPrediction
+  proctoringEvents?: ProctoringEvent[]
+  proctoringSummary?: ProctoringSummary
 }
 
 const algebraGeometryFoundations: QuizDefinition = {
