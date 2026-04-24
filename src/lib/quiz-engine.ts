@@ -179,6 +179,15 @@ export type QuizAttempt = {
   integrityReview?: IntegrityReview
   errorAnalyses?: ErrorAnalysisEntry[]
   eocPrediction?: EocPrediction
+  proctorEvents?: {
+    id: string
+    type: string
+    severity: "low" | "medium" | "high"
+    timestamp: string
+    quizId?: string
+    detail?: string
+    metadata?: Record<string, unknown>
+  }[]
 }
 
 const algebraGeometryFoundations: QuizDefinition = {

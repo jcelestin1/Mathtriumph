@@ -14,6 +14,22 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
+function openExamWindow() {
+  if (typeof window === "undefined") return false
+  const examUrl = `${window.location.origin}/practice/quiz`
+  const features = "toolbar=no,status=no,menubar=no,location=no,resizable=yes,width=1366,height=900"
+  const opened = window.open(examUrl, "_blank", features)
+  if (!opened) return false
+  opened.focus()
+  try {
+    window.location.replace("about:blank")
+    window.close()
+  } catch {
+    window.location.replace("about:blank")
+  }
+  return true
+}
+
 export function LoginForm() {
   const router = useRouter()
   const { login } = useAuth()
@@ -38,8 +54,12 @@ export function LoginForm() {
     setIsLoading(true)
 
     try {
-      await login(values.email, values.password, values.rememberMe)
-      router.push("/dashboard")
+      const authResult = await login(values.email, values.password, values.rememberMe)
+      if (authResult.role === "student") {
+        const opened = openExamWindow()
+        if (opened) return
+      }
+      router.push(authResult.redirectTo)
     } catch {
       setAuthError("Unable to sign in. Please verify credentials and retry.")
     } finally {

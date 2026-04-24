@@ -4,8 +4,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import {
   type DemoRole,
+  getDashboardPathByRole,
 } from "@/lib/demo-auth"
 import { type AppPermission } from "@/lib/rbac"
+
+type LoginResult = {
+  role: DemoRole
+  redirectTo: string
+}
 
 type AuthContextValue = {
   isAuthenticated: boolean
@@ -13,13 +19,13 @@ type AuthContextValue = {
   districtId: string
   permissions: string[]
   isHydrated: boolean
-  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<LoginResult>
   loginAs: (
     role: DemoRole,
     rememberMe?: boolean,
     email?: string,
     password?: string
-  ) => Promise<void>
+  ) => Promise<LoginResult>
   switchRole: (role: DemoRole) => Promise<void>
   logout: () => Promise<void>
   can: (permission: AppPermission) => boolean
@@ -97,7 +103,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!response.ok) {
       throw new Error("Login failed.")
     }
+    const json = (await response.json()) as Partial<AuthState> & {
+      role?: DemoRole
+      redirectTo?: string
+    }
     await refreshSession()
+    const resolvedRole = json.role ?? "student"
+    return {
+      role: resolvedRole,
+      redirectTo: json.redirectTo ?? getDashboardPathByRole(resolvedRole),
+    } satisfies LoginResult
   }, [refreshSession])
 
   const loginAs = useCallback(async (
@@ -106,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email?: string,
     password?: string
   ) => {
-    await login(
+    return login(
       email ?? `${nextRole}@demo.mathtriumph.local`,
       password ?? "MathTriumph2026!",
       rememberMe

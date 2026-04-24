@@ -130,6 +130,12 @@
 }
 
 @layer utilities {
+  body.exam-secure-locked #secure-exam-surface {
+    filter: blur(15px) saturate(0.8);
+    pointer-events: none;
+    user-select: none;
+  }
+
   .math-grid-bg {
     background-image:
       linear-gradient(to right, rgb(15 118 110 / 0.08) 1px, transparent 1px),

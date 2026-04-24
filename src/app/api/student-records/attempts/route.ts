@@ -45,6 +45,19 @@ const MinimalAttemptSchema = z.object({
   integrityReview: z.any().optional(),
   errorAnalyses: z.array(z.any()).optional(),
   eocPrediction: z.any().optional(),
+  proctorEvents: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        type: z.string().min(1),
+        severity: z.enum(["low", "medium", "high"]),
+        timestamp: z.string().min(1),
+        quizId: z.string().optional(),
+        detail: z.string().max(500).optional(),
+        metadata: z.record(z.string(), z.unknown()).optional(),
+      })
+    )
+    .optional(),
 })
 
 export async function GET(request: Request) {

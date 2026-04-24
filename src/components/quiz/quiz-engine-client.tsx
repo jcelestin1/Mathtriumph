@@ -11,7 +11,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { BlockMath } from "react-katex"
 
 import "katex/dist/katex.min.css"
@@ -36,10 +36,19 @@ import {
 } from "@/lib/quiz-engine"
 import { getDashboardPathByRole } from "@/lib/demo-auth"
 import { saveQuizAttempt, syncQuizAttempts } from "@/lib/quiz-storage"
+import { useExamProctoring } from "@/hooks/use-exam-proctoring"
 import { DualStreamErrorAnalysis } from "@/components/quiz/dual-stream-error-analysis"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress"
 
@@ -85,10 +94,24 @@ export function QuizEngineClient({ quiz }: Props) {
   const [aiStatus, setAiStatus] = useState<AiStatusResponse | null>(null)
   const [analysisTeacherAction, setAnalysisTeacherAction] = useState("")
   const [recentAttempts, setRecentAttempts] = useState<QuizAttempt[]>([])
+  const submitInFlightRef = useRef(false)
 
   const currentQuestion = sessionQuiz.questions[currentIndex]
   const isCompleted = Boolean(submittedAttempt)
   const progressPercent = ((currentIndex + 1) / sessionQuiz.questions.length) * 100
+  const {
+    isLocked,
+    justification,
+    setJustification,
+    canSubmitReentry,
+    penaltyTimerLabel,
+    penaltySeverity,
+    warningReasons,
+    showHardwareModal,
+    acknowledgeHardwareModal,
+    submitReentry,
+    proctorEvents,
+  } = useExamProctoring({ quizId: sessionQuiz.id, enabled: !isCompleted })
 
   useEffect(() => {
     if (isCompleted) return
@@ -118,6 +141,7 @@ export function QuizEngineClient({ quiz }: Props) {
   }, [timeLeftSeconds])
 
   function updateAnswer(value: string) {
+    if (isLocked) return
     setAnswers((prev) => {
       const previousAnswer = prev[currentQuestion.id] ?? ""
       if (previousAnswer !== value) {
@@ -149,6 +173,7 @@ export function QuizEngineClient({ quiz }: Props) {
   }
 
   function moveToQuestion(nextIndex: number) {
+    if (isLocked) return
     trackQuestionExitTime(currentQuestion.id)
     setCurrentIndex(nextIndex)
     setQuestionStartedAt(Date.now())
@@ -162,6 +187,7 @@ export function QuizEngineClient({ quiz }: Props) {
   }
 
   function onCheckAndContinue() {
+    if (isLocked) return
     runCheckForCurrent()
     if (currentIndex < sessionQuiz.questions.length - 1) {
       moveToQuestion(currentIndex + 1)
@@ -293,110 +319,117 @@ export function QuizEngineClient({ quiz }: Props) {
   }
 
   async function handleSubmitAttempt() {
-    trackQuestionExitTime(currentQuestion.id)
-    const completedAt = new Date().toISOString()
-    const elapsedSeconds = Math.max(
-      0,
-      sessionQuiz.durationMinutes * 60 - timeLeftSeconds
-    )
-
-    const results = sessionQuiz.questions.map((question) => {
-      const userAnswer = answers[question.id] ?? ""
-      const isCorrect = evaluateQuestion(question, userAnswer)
-      return {
-        questionId: question.id,
-        topic: question.topic,
-        course: question.course,
-        bestBenchmark: question.bestBenchmark,
-        reportingCategory: question.reportingCategory,
-        isCorrect,
-        userAnswer,
-        expectedAnswer: getExpectedAnswerLabel(question),
-        confidenceLevel: confidenceByQuestion[question.id] ?? 0,
-      }
-    })
-
-    const questionWorkPayload = sessionQuiz.questions.map((question) => ({
-      questionId: question.id,
-      workShown: workShown[question.id] ?? "",
-      reasoningNote: reasoningNotes[question.id] ?? "",
-      confidenceLevel: confidenceByQuestion[question.id] ?? 0,
-      answerChanges: answerChanges[question.id] ?? 0,
-      timeSpentSeconds: timeSpentByQuestion[question.id] ?? 0,
-    }))
-
-    const correctCount = results.filter((item) => item.isCorrect).length
-    const scorePercent = Math.round((correctCount / sessionQuiz.questions.length) * 100)
-    const antiCheatFlags = buildAntiCheatFlags(
-      elapsedSeconds,
-      scorePercent,
-      results,
-      questionWorkPayload
-    )
-    const similarityFlag = buildSimilarityFlag(questionWorkPayload)
-    if (similarityFlag) {
-      antiCheatFlags.push(similarityFlag)
-    }
-    let errorAnalyses: ErrorAnalysisEntry[] = []
-    let eocPrediction: EocPrediction | undefined
-    let inferredTeacherAction = ""
+    if (submitInFlightRef.current) return
+    submitInFlightRef.current = true
     try {
-      const pipelineResponse = await fetch("/api/ai/analysis-pipeline", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          purpose: "eoc_preparation",
-          districtId,
-          quiz: sessionQuiz,
-          results,
-          questionWork: questionWorkPayload,
-          scorePercent,
-        }),
-      })
-      if (pipelineResponse.ok) {
-        const pipelineJson = (await pipelineResponse.json()) as {
-          analyses?: ErrorAnalysisEntry[]
-          prediction?: EocPrediction
-          suggestedTeacherAction?: string
+      trackQuestionExitTime(currentQuestion.id)
+      const completedAt = new Date().toISOString()
+      const elapsedSeconds = Math.max(
+        0,
+        sessionQuiz.durationMinutes * 60 - timeLeftSeconds
+      )
+
+      const results = sessionQuiz.questions.map((question) => {
+        const userAnswer = answers[question.id] ?? ""
+        const isCorrect = evaluateQuestion(question, userAnswer)
+        return {
+          questionId: question.id,
+          topic: question.topic,
+          course: question.course,
+          bestBenchmark: question.bestBenchmark,
+          reportingCategory: question.reportingCategory,
+          isCorrect,
+          userAnswer,
+          expectedAnswer: getExpectedAnswerLabel(question),
+          confidenceLevel: confidenceByQuestion[question.id] ?? 0,
         }
-        errorAnalyses = pipelineJson.analyses ?? []
-        eocPrediction = pipelineJson.prediction
-        inferredTeacherAction = pipelineJson.suggestedTeacherAction ?? ""
-      }
-    } catch {
-      // Fall back to no AI analysis if secure pipeline is unavailable.
-    }
-    const oralVerificationPrompts = results
-      .filter((result) => !result.isCorrect)
-      .slice(0, 3)
-      .map((result) => {
-        const question = sessionQuiz.questions.find((item) => item.id === result.questionId)
-        return `Explain your reasoning for ${result.topic}: "${question?.prompt ?? "question"}".`
       })
 
-    const attempt: QuizAttempt = {
-      attemptId: `${sessionQuiz.id}-${Date.now()}`,
-      quizId: sessionQuiz.id,
-      role,
-      startedAt,
-      completedAt,
-      elapsedSeconds,
-      scorePercent,
-      answers,
-      results,
-      questionWork: questionWorkPayload,
-      antiCheatFlags,
-      oralVerificationPrompts,
-      integrityReview: { status: "pending" },
-      errorAnalyses,
-      eocPrediction,
-    }
+      const questionWorkPayload = sessionQuiz.questions.map((question) => ({
+        questionId: question.id,
+        workShown: workShown[question.id] ?? "",
+        reasoningNote: reasoningNotes[question.id] ?? "",
+        confidenceLevel: confidenceByQuestion[question.id] ?? 0,
+        answerChanges: answerChanges[question.id] ?? 0,
+        timeSpentSeconds: timeSpentByQuestion[question.id] ?? 0,
+      }))
 
-    await saveQuizAttempt(attempt)
-    const latestAttempts = await syncQuizAttempts()
-    setRecentAttempts(latestAttempts)
-    setSubmittedAttempt(attempt)
-    setAnalysisTeacherAction(inferredTeacherAction)
+      const correctCount = results.filter((item) => item.isCorrect).length
+      const scorePercent = Math.round((correctCount / sessionQuiz.questions.length) * 100)
+      const antiCheatFlags = buildAntiCheatFlags(
+        elapsedSeconds,
+        scorePercent,
+        results,
+        questionWorkPayload
+      )
+      const similarityFlag = buildSimilarityFlag(questionWorkPayload)
+      if (similarityFlag) {
+        antiCheatFlags.push(similarityFlag)
+      }
+      let errorAnalyses: ErrorAnalysisEntry[] = []
+      let eocPrediction: EocPrediction | undefined
+      let inferredTeacherAction = ""
+      try {
+        const pipelineResponse = await fetch("/api/ai/analysis-pipeline", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            purpose: "eoc_preparation",
+            districtId,
+            quiz: sessionQuiz,
+            results,
+            questionWork: questionWorkPayload,
+            scorePercent,
+          }),
+        })
+        if (pipelineResponse.ok) {
+          const pipelineJson = (await pipelineResponse.json()) as {
+            analyses?: ErrorAnalysisEntry[]
+            prediction?: EocPrediction
+            suggestedTeacherAction?: string
+          }
+          errorAnalyses = pipelineJson.analyses ?? []
+          eocPrediction = pipelineJson.prediction
+          inferredTeacherAction = pipelineJson.suggestedTeacherAction ?? ""
+        }
+      } catch {
+        // Fall back to no AI analysis if secure pipeline is unavailable.
+      }
+      const oralVerificationPrompts = results
+        .filter((result) => !result.isCorrect)
+        .slice(0, 3)
+        .map((result) => {
+          const question = sessionQuiz.questions.find((item) => item.id === result.questionId)
+          return `Explain your reasoning for ${result.topic}: "${question?.prompt ?? "question"}".`
+        })
+
+      const attempt: QuizAttempt = {
+        attemptId: `${sessionQuiz.id}-${Date.now()}`,
+        quizId: sessionQuiz.id,
+        role,
+        startedAt,
+        completedAt,
+        elapsedSeconds,
+        scorePercent,
+        answers,
+        results,
+        questionWork: questionWorkPayload,
+        antiCheatFlags,
+        oralVerificationPrompts,
+        integrityReview: { status: "pending" },
+        errorAnalyses,
+        eocPrediction,
+        proctorEvents,
+      }
+
+      await saveQuizAttempt(attempt)
+      const latestAttempts = await syncQuizAttempts()
+      setRecentAttempts(latestAttempts)
+      setSubmittedAttempt(attempt)
+      setAnalysisTeacherAction(inferredTeacherAction)
+    } finally {
+      submitInFlightRef.current = false
+    }
   }
 
   function onRestartQuiz() {
@@ -416,6 +449,7 @@ export function QuizEngineClient({ quiz }: Props) {
     setAnalysisTeacherAction("")
     setTimeLeftSeconds(sessionQuiz.durationMinutes * 60)
     setQuestionStartedAt(Date.now())
+    submitInFlightRef.current = false
   }
 
   useEffect(() => {
@@ -490,6 +524,26 @@ export function QuizEngineClient({ quiz }: Props) {
 
   return (
     <section className="mx-auto w-full max-w-4xl space-y-4">
+      <Dialog open={showHardwareModal} onOpenChange={(nextOpen) => !nextOpen && acknowledgeHardwareModal()}>
+        <DialogContent showCloseButton>
+          <DialogHeader>
+            <DialogTitle>You aren&apos;t slick.</DialogTitle>
+            <DialogDescription>
+              Potential secondary display setup detected. Disconnect extra HDMI/TV displays.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="ml-4 list-disc space-y-1 text-xs text-muted-foreground">
+            {(warningReasons.length ? warningReasons : ["No additional details available."]).map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+          <DialogFooter>
+            <Button type="button" onClick={acknowledgeHardwareModal}>
+              Acknowledge
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Card className="border-teal-200/70">
         <CardHeader className="space-y-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
@@ -521,6 +575,36 @@ export function QuizEngineClient({ quiz }: Props) {
         </CardHeader>
       </Card>
 
+      {isLocked && !isCompleted ? (
+        <Card className="border-amber-300/70 bg-amber-50/60 dark:bg-amber-500/10">
+          <CardHeader>
+            <CardTitle className="inline-flex items-center gap-2 text-amber-900 dark:text-amber-200">
+              <ShieldAlert className="size-4" />
+              Session Active: Re-entry Penalty
+            </CardTitle>
+            <CardDescription>
+              Focus/tab switch detected. Exam remains blurred until penalty time completes and justification is submitted.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Severity: <strong>{penaltySeverity}</strong> • Re-entry unlock timer: <strong>{penaltyTimerLabel}</strong>
+            </p>
+            <textarea
+              value={justification}
+              onChange={(event) => setJustification(event.target.value)}
+              rows={4}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              placeholder="Explain why focus was lost (required, minimum 20 characters)."
+            />
+            <Button type="button" onClick={submitReentry} disabled={!canSubmitReentry}>
+              Submit Re-entry
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div id="secure-exam-surface" className="space-y-4">
       {isCompleted && submittedAttempt ? (
         <Card className="border-emerald-300/70 bg-emerald-50/40 dark:bg-emerald-500/10">
           <CardHeader>
@@ -703,6 +787,7 @@ export function QuizEngineClient({ quiz }: Props) {
                 variant={instantFeedback ? "default" : "outline"}
                 onClick={() => setInstantFeedback((prev) => !prev)}
                 className="h-7"
+                disabled={isLocked}
               >
                 <Sparkles className="mr-1 size-3.5" />
                 Instant Feedback: {instantFeedback ? "On" : "Off"}
@@ -725,6 +810,7 @@ export function QuizEngineClient({ quiz }: Props) {
                       key={option}
                       type="button"
                       onClick={() => updateAnswer(option)}
+                      disabled={isLocked}
                       className={`rounded-md border p-2 text-left text-sm transition ${
                         active
                           ? "border-teal-500 bg-teal-50 text-teal-800 dark:bg-teal-500/10 dark:text-teal-200"
@@ -741,6 +827,7 @@ export function QuizEngineClient({ quiz }: Props) {
                 value={answers[currentQuestion.id] ?? ""}
                 onChange={(event) => updateAnswer(event.target.value)}
                 placeholder="Type your final answer..."
+                disabled={isLocked}
               />
             )}
             <textarea
@@ -754,6 +841,7 @@ export function QuizEngineClient({ quiz }: Props) {
               rows={3}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
               placeholder="Show your steps (required): write how you solved this question."
+              disabled={isLocked}
             />
             <Input
               value={reasoningNotes[currentQuestion.id] ?? ""}
@@ -764,6 +852,7 @@ export function QuizEngineClient({ quiz }: Props) {
                 }))
               }
               placeholder="Reasoning check (optional): Why is your answer correct?"
+              disabled={isLocked}
             />
             <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">Confidence:</span>
@@ -776,6 +865,7 @@ export function QuizEngineClient({ quiz }: Props) {
                     [currentQuestion.id]: Number(event.target.value),
                   }))
                 }
+                disabled={isLocked}
               >
                 <option value="">Select</option>
                 <option value="1">1 - Guessing</option>
@@ -826,7 +916,7 @@ export function QuizEngineClient({ quiz }: Props) {
               <Button
                 variant="outline"
                 onClick={() => moveToQuestion(Math.max(0, currentIndex - 1))}
-                disabled={currentIndex === 0}
+                disabled={currentIndex === 0 || isLocked}
               >
                 Previous
               </Button>
@@ -834,7 +924,7 @@ export function QuizEngineClient({ quiz }: Props) {
                 {instantFeedback ? (
                   <Button
                     onClick={onCheckAndContinue}
-                    disabled={!canProceedCurrent()}
+                    disabled={!canProceedCurrent() || isLocked}
                   >
                     {currentIndex === sessionQuiz.questions.length - 1
                       ? "Check Answer"
@@ -849,7 +939,8 @@ export function QuizEngineClient({ quiz }: Props) {
                     }
                     disabled={
                       currentIndex === sessionQuiz.questions.length - 1 ||
-                      !canProceedCurrent()
+                      !canProceedCurrent() ||
+                      isLocked
                     }
                   >
                     Next
@@ -858,7 +949,7 @@ export function QuizEngineClient({ quiz }: Props) {
                 <Button
                   variant="secondary"
                   onClick={handleSubmitAttempt}
-                  disabled={Object.keys(answers).length === 0 || !canProceedCurrent()}
+                  disabled={Object.keys(answers).length === 0 || !canProceedCurrent() || isLocked}
                 >
                   Submit Attempt
                 </Button>
@@ -867,6 +958,7 @@ export function QuizEngineClient({ quiz }: Props) {
           </CardContent>
         </Card>
       )}
+      </div>
     </section>
   )
 }

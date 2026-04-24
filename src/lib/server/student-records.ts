@@ -9,8 +9,19 @@ type StoredRecord = {
   attempts: QuizAttempt[]
 }
 
+type StoredProctorEvent = {
+  id: string
+  type: string
+  severity: "low" | "medium" | "high"
+  timestamp: string
+  quizId?: string
+  detail?: string
+  metadata?: Record<string, unknown>
+}
+
 type StoreShape = {
   records: Record<string, StoredRecord>
+  proctorEvents?: Record<string, StoredProctorEvent[]>
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data")
@@ -19,9 +30,13 @@ const RECORDS_FILE = path.join(DATA_DIR, "student-records.enc")
 async function readStore(): Promise<StoreShape> {
   try {
     const encrypted = await readFile(RECORDS_FILE, "utf8")
-    return decryptJson<StoreShape>(encrypted)
+    const parsed = decryptJson<StoreShape>(encrypted)
+    return {
+      records: parsed.records ?? {},
+      proctorEvents: parsed.proctorEvents ?? {},
+    }
   } catch {
-    return { records: {} }
+    return { records: {}, proctorEvents: {} }
   }
 }
 
@@ -88,6 +103,33 @@ export async function updateAttemptReview(
 
 export async function deleteUserAttempts(districtId: string, userId: string) {
   const store = await readStore()
-  delete store.records[userKey(districtId, userId)]
+  const key = userKey(districtId, userId)
+  delete store.records[key]
+  if (store.proctorEvents) {
+    delete store.proctorEvents[key]
+  }
+  await writeStore(store)
+}
+
+export async function appendProctorEvents(
+  districtId: string,
+  userId: string,
+  events: StoredProctorEvent[]
+) {
+  if (!events.length) return
+  const store = await readStore()
+  const key = userKey(districtId, userId)
+  const existing = store.proctorEvents?.[key] ?? []
+  const sanitized = events.slice(0, 120).map((event) => ({
+    ...event,
+    metadata:
+      event.metadata && typeof event.metadata === "object"
+        ? event.metadata
+        : undefined,
+  }))
+  store.proctorEvents = {
+    ...(store.proctorEvents ?? {}),
+    [key]: [...sanitized, ...existing].slice(0, 2_000),
+  }
   await writeStore(store)
 }

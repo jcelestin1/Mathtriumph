@@ -1,11 +1,10 @@
 import type { Metadata } from "next"
-import Link from "next/link"
-import { BookOpenCheck, Clock3, PlayCircle } from "lucide-react"
+import { BookOpenCheck, Clock3 } from "lucide-react"
 
 import { getAllQuizzes } from "@/lib/quiz-engine"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SecureStartQuizButton } from "@/components/quiz/secure-start-quiz-button"
 
 export const metadata: Metadata = {
   title: "Practice Quiz Library",
@@ -54,13 +53,10 @@ export default function PracticeQuizLibraryPage() {
                   </Badge>
                 ))}
               </div>
-              <Button
-                render={<Link href={`/practice/quiz/${quiz.id}`} />}
-                className="w-full bg-teal-600 text-white hover:bg-teal-700"
-              >
-                <PlayCircle className="mr-1 size-4" />
-                Start Quiz
-              </Button>
+              <SecureStartQuizButton quizId={quiz.id} />
+              <p className="text-xs text-muted-foreground">
+                Launches in secure exam mode with hardware checks.
+              </p>
             </CardContent>
           </Card>
         ))}
