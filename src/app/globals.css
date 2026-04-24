@@ -140,4 +140,21 @@
   .premium-surface {
     @apply border border-border/70 bg-background/85 shadow-[0_8px_30px_rgb(2_132_199/0.08)] backdrop-blur;
   }
+
+  /*
+   * Exam lockdown: when a focus/visibility violation triggers a penalty, we
+   * apply this single class to a wrapper instead of removing/reattaching the
+   * test DOM. `filter: blur` is GPU-accelerated and `pointer-events: none`
+   * prevents accidental edits while the penalty modal is open.
+   *
+   * We also pin the transform layer with `transform: translateZ(0)` so the
+   * blur stays on the compositor and never repaints the underlying text.
+   */
+  .exam-lockdown {
+    filter: blur(15px) saturate(0.85);
+    pointer-events: none;
+    user-select: none;
+    transform: translateZ(0);
+    transition: filter 120ms ease-out;
+  }
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import { BookOpenCheck, Clock3, PlayCircle } from "lucide-react"
+import { BookOpenCheck, Clock3, PlayCircle, ShieldCheck } from "lucide-react"
 
 import { getAllQuizzes } from "@/lib/quiz-engine"
 import { Badge } from "@/components/ui/badge"
@@ -54,13 +54,23 @@ export default function PracticeQuizLibraryPage() {
                   </Badge>
                 ))}
               </div>
-              <Button
-                render={<Link href={`/practice/quiz/${quiz.id}`} />}
-                className="w-full bg-teal-600 text-white hover:bg-teal-700"
-              >
-                <PlayCircle className="mr-1 size-4" />
-                Start Quiz
-              </Button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  render={<Link href={`/practice/quiz/${quiz.id}`} />}
+                  className="w-full bg-teal-600 text-white hover:bg-teal-700"
+                >
+                  <PlayCircle className="mr-1 size-4" />
+                  Start Quiz
+                </Button>
+                <Button
+                  variant="outline"
+                  render={<Link href={`/practice/exam/${quiz.id}`} />}
+                  className="w-full border-emerald-500/70 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                >
+                  <ShieldCheck className="mr-1 size-4" />
+                  Proctored Exam
+                </Button>
+              </div>
             </CardContent>
           </Card>
         ))}
