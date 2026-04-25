@@ -67,7 +67,7 @@ export function useQuizProctoring({
   const [hardwareWarningReasons, setHardwareWarningReasons] = useState<string[]>([])
   const [cameraStatus, setCameraStatus] = useState<"idle" | "ready" | "blocked">("idle")
   const [totalEventCount, setTotalEventCount] = useState(0)
-  const [cooldownRemainingMs, setCooldownRemainingMs] = useState(0)
+  const [cooldownTickNow, setCooldownTickNow] = useState(() => Date.now())
   const [proctoringSummary, setProctoringSummary] = useState<ProctoringSummary>(() => ({
     sessionId: attemptId,
     quizId,
@@ -176,8 +176,9 @@ export function useQuizProctoring({
       if (focusLossStartedAtRef.current === null) return
 
       const awayDurationMs = Math.max(0, now - focusLossStartedAtRef.current)
+      const wasHidden = hiddenDuringLossRef.current
       const penalty = getPenaltyForFocusLoss({
-        wasHidden: hiddenDuringLossRef.current,
+        wasHidden,
         awayDurationMs,
         priorIncidents: summaryRef.current.focusLossCount,
       })
@@ -192,7 +193,7 @@ export function useQuizProctoring({
         message: `Focus returned. ${penalty.label} required before re-entry approval.`,
         cooldownUntil,
         awayDurationMs,
-        wasHidden: hiddenDuringLossRef.current,
+        wasHidden,
       })
       hiddenDuringLossRef.current = false
 
@@ -212,7 +213,7 @@ export function useQuizProctoring({
             hasFocus,
             isVisible,
             awayDurationMs,
-            wasHidden: hiddenDuringLossRef.current,
+            wasHidden,
           },
         },
         (prev) => ({
@@ -223,6 +224,42 @@ export function useQuizProctoring({
       )
     },
     [recordEvent]
+  )
+
+  const syncFocusState = useCallback(
+    (source: "window_blur" | "window_focus" | "visibilitychange" | "heartbeat", now = Date.now()) => {
+      const hasFocus = document.hasFocus()
+      const isVisible = document.visibilityState === "visible"
+
+      if (!hasFocus || !isVisible) {
+        if (focusLossStartedAtRef.current === null) {
+          focusLossStartedAtRef.current = now
+          hiddenDuringLossRef.current = !isVisible
+          setLockState({
+            status: "focus-lost",
+            severity: "medium",
+            message: "Focus was lost. Return to this exam to begin the re-entry penalty timer.",
+          })
+          recordEvent({
+            type: "focus_lost",
+            detail: "Exam focus lost; blur lock applied.",
+            severity: "medium",
+            metadata: {
+              source,
+              hasFocus,
+              isVisible,
+              visibilityState: document.visibilityState,
+            },
+          })
+        } else if (!isVisible) {
+          hiddenDuringLossRef.current = true
+        }
+        return
+      }
+
+      onFocusRestored(now, hasFocus, isVisible)
+    },
+    [onFocusRestored, recordEvent]
   )
 
   const submitReentry = useCallback(async () => {
@@ -284,15 +321,46 @@ export function useQuizProctoring({
     }
 
     const timer = window.setInterval(() => {
-      setCooldownRemainingMs((current) => current + 1)
+      setCooldownTickNow(Date.now())
     }, 1_000)
     return () => window.clearInterval(timer)
   }, [lockState])
   const cooldownLabel = useMemo(
-    () => formatDurationLabel(cooldownRemainingMs),
-    [cooldownRemainingMs]
+    () =>
+      formatDurationLabel(
+        lockState?.status === "cooldown" && lockState.cooldownUntil
+          ? Math.max(0, lockState.cooldownUntil - cooldownTickNow)
+          : 0
+      ),
+    [cooldownTickNow, lockState]
   )
 
+
+  useEffect(() => {
+    if (!secureMode || isCompleted) return
+
+    const handleVisibilityChange = () => {
+      syncFocusState("visibilitychange")
+    }
+
+    const handleWindowBlur = () => {
+      syncFocusState("window_blur")
+    }
+
+    const handleWindowFocus = () => {
+      syncFocusState("window_focus")
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    window.addEventListener("blur", handleWindowBlur)
+    window.addEventListener("focus", handleWindowFocus)
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.removeEventListener("blur", handleWindowBlur)
+      window.removeEventListener("focus", handleWindowFocus)
+    }
+  }, [isCompleted, secureMode, syncFocusState])
 
   useEffect(() => {
     if (!secureMode || isCompleted) return
@@ -343,7 +411,12 @@ export function useQuizProctoring({
   useEffect(() => {
     if (!secureMode || isCompleted) return
 
-    const workerParts = createHeartbeatWorker()
+    let workerParts: ReturnType<typeof createHeartbeatWorker> | null = null
+    try {
+      workerParts = createHeartbeatWorker()
+    } catch {
+      return
+    }
     if (!workerParts) return
 
     workerRef.current = workerParts.worker
@@ -366,32 +439,7 @@ export function useQuizProctoring({
         },
       })
 
-      if (!hasFocus || !isVisible) {
-        if (focusLossStartedAtRef.current === null) {
-          focusLossStartedAtRef.current = now
-          hiddenDuringLossRef.current = !isVisible
-          setLockState({
-            status: "focus-lost",
-            severity: "medium",
-            message: "Focus was lost. Return to this exam to begin the re-entry penalty timer.",
-          })
-          recordEvent({
-            type: "focus_lost",
-            detail: "Exam focus lost; blur lock applied.",
-            severity: "medium",
-            metadata: {
-              hasFocus,
-              isVisible,
-              visibilityState: document.visibilityState,
-            },
-          })
-        } else if (!isVisible) {
-          hiddenDuringLossRef.current = true
-        }
-        return
-      }
-
-      onFocusRestored(now, hasFocus, isVisible)
+      syncFocusState("heartbeat", now)
     }
 
     workerParts.worker.postMessage({
@@ -405,7 +453,7 @@ export function useQuizProctoring({
       disposeWorkerRef.current?.()
       disposeWorkerRef.current = null
     }
-  }, [isCompleted, onFocusRestored, recordEvent, secureMode])
+  }, [isCompleted, recordEvent, secureMode, syncFocusState])
 
   useEffect(() => {
     if (!secureMode || isCompleted || !navigator.mediaDevices?.getUserMedia) return

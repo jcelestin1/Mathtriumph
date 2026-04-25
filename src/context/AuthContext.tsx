@@ -121,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password?: string
   ) => {
     return login(
-      email ?? `${nextRole}@demo.mathtriumph.local`,
+      email ?? `${nextRole}@mathtriumph.local`,
       password ?? "MathTriumph2026!",
       rememberMe
     )

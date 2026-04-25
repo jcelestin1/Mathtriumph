@@ -33,12 +33,13 @@ export function DemoLoginButtons() {
             variant="outline"
             className="justify-start border-teal-200 bg-white/90 text-xs text-teal-900 hover:bg-teal-100 dark:border-teal-500/30 dark:bg-transparent dark:text-teal-100"
             onClick={async () => {
-              const result = await loginAs(
-                role,
-                true,
-                `${role}@demo.mathtriumph.local`,
-                "MathTriumph2026!"
-              )
+              const seededEmail =
+                role === "teacher"
+                  ? "teacher@mathtriumph.local"
+                  : role === "parent"
+                    ? "parent@mathtriumph.local"
+                    : "student@mathtriumph.local"
+              const result = await loginAs(role, true, seededEmail, "MathTriumph2026!")
               if (role === "student") {
                 const opened = launchSecureExamWindow("/practice/quiz?mode=secure")
                 if (opened.opened) {

@@ -117,7 +117,7 @@ export function DemoHomeClient() {
       const result = await loginAs(
         targetRole as DemoRole,
         true,
-        `${targetRole}@demo.mathtriumph.local`,
+        `${targetRole}@mathtriumph.local`,
         "MathTriumph2026!"
       )
       if (targetRole === "student") {
